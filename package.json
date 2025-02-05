@@ -1,0 +1,42 @@
+{
+  "name": "browser-node",
+  "version": "1.0.0",
+  "description": "Browsers as a Service Implementation: node",
+  "scripts": {
+    "build:image": "docker build -t browser-node-ts .",
+    "build:image:arm64": "docker build --build-arg BROWSER=brave -t browser-node-ts .",
+    "build": "rm -rf build &&  tsc && copyfiles -u 1 src/types/**/*.json build/",
+    "dev:solo": "ts-node ./src/main.ts --debug --no-state-manger --local",
+    "dev": "ts-node ./src/main.ts --debug",
+    "staging": "node ./src/main.js --staging",
+    "start": "node ./src/main.js",
+    "dev:poc": "docker run --rm --name browser-node-ts_10222 -e XVFB_RESOLUTION=1280x2400 -e VNC_NO_SSL=true -e STUNNEL_HTTP=true -e REPORT_STATE=false -p 7070:8080 -p 10222:19222 -p 15900:15900 browser-node-ts"
+  },
+  "keywords": [],
+  "dependencies": {
+    "axios": "^1.7.2",
+    "better-sqlite3": "^11.1.2",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "multer": "^1.4.5-lts.1",
+    "node-cache": "^5.1.2",
+    "puppeteer": "^24.1.0",
+    "socket.io": "^4.8.1",
+    "tar": "^7.4.0",
+    "user-agents": "^1.1.423",
+    "uuid": "^9.0.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/express": "^4.17.21",
+    "@types/multer": "^1.4.11",
+    "@types/node": "^16.18.99",
+    "@types/socket.io": "^3.0.2",
+    "@types/user-agents": "^1.0.4",
+    "@types/uuid": "^9.0.8",
+    "copyfiles": "^2.4.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  }
+}

@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: browser-node
+  namespace: browser-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: browser-node
+      status: green
+  template:
+    metadata:
+      labels:
+        app: browser-node
+        status: green
+    spec:
+      containers:
+      - name: browser-node
+        image: browser-node-ts
+        imagePullPolicy: Never
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8080
+        env: 
+        - name: STATE_MGR_URL
+          value: http://browser-smgr
+        - name: BROWSER_PORT
+          value: "19222"
+        - name: VNC_PORT
+          value: "5900"
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: POD_NAME
+          valueFrom: 
+            fieldRef: 
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom: 
+            fieldRef:
+              fieldPath: metadata.namespace
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "1424Mi" 
+        ports:
+        - containerPort: 15900
+        - containerPort: 8080
+        - containerPort: 19222

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<openbox_menu>  
+  <menu id="root-menu" label="RootMenu">
+    <item label="Terminal">
+        <icon>terminal</icon>
+      <action name="Execute">
+         <command>xterm</command>
+      </action>
+    </item>
+  </menu>
+</openbox_menu>

@@ -1,0 +1,189 @@
+#!/bin/bash
+
+main() {
+    change_xvfb_resolution    # Change Xvfb resolution
+    run_pulseaudio            # Pulseaudio
+    create_virtual_sinks      # Create virtual sinks
+    create_virtual_sources    # Create virtual sources
+    # create_virtual_cameras    # Create virtual cameras
+    run_vnc_server            # VNC server
+    run_WebSocify             # VNC WebSocify
+    run_mitmproxy             # mitmproxy
+}
+
+change_xvfb_resolution() {
+    local resolution=${XVFB_RESOLUTION:-1280x1024}
+    
+    # cannot adjust those
+    # local depth=${XVFB_DEPTH:-24}
+    # local DPI=${XVFB_DPI:-96}
+
+    # Check if xrandr is available and can be used
+    if ! which xrandr >/dev/null; then
+        echo "[ERROR] xrandr is not installed or not found in PATH."
+        return 1
+    fi
+
+    # Check the current resolution and compare it with the desired resolution
+    local current_resolution=$(xrandr --display :1 | grep '*' | awk '{print $1}')
+
+    if [ "$current_resolution" = "$resolution" ]; then
+        echo "[INFO] The current resolution ($current_resolution) is already set to the default ($resolution). No adjustment needed."
+        return 0
+    fi
+
+    # Attempt to change the resolution if it is not already set to the desired default
+    xrandr --display :1 --size ${resolution} || {
+        echo "[ERROR] Failed to set resolution to ${resolution}."
+        return 1
+    }
+
+    echo "[INFO] Resolution changed to ${resolution}."
+}
+
+# TODO - permission issues
+# create_virtual_cameras() {
+#     local num_cameras="${NUM_CAMERAS:-1}"
+#     local i=1
+# 
+#     # Create a 5-second black video
+#     ffmpeg -f lavfi -i color=c=black:s=1280x720:d=5 /home/black.mp4
+# 
+#     # Load the v4l2loopback module
+#     modprobe v4l2loopback devices=$num_cameras
+# 
+#     while [ $i -le $num_cameras ]
+#     do
+#         # Send video to the virtual webcam
+#         # ffmpeg -re -i /path/to/video.mp4 -map 0:v -f v4l2 /dev/video${i} &
+#         ffmpeg -re -stream_loop -1 -i /home/black.mp4 -map 0:v -f v4l2 /dev/video${i} &
+#         i=$((i + 1))
+#     done
+# }
+
+run_pulseaudio() {
+    pulseaudio -D --exit-idle-time=-1 --disable-shm=1 --disallow-exit --log-level=0
+}
+
+# Function to create virtual sinks
+create_virtual_sinks() {
+    local num_speakers="${NUM_SPEAKERS:-1}"
+    local i=1
+
+    while [ $i -le $num_speakers ]
+    do
+        pacmd load-module module-null-sink sink_name="Speaker_${i}" sink_properties=device.description="Speaker_${i}"
+        i=$((i + 1))
+    done
+
+    # Set default sink
+    pacmd set-default-sink "Speaker_1"
+}
+
+# Function to create virtual sources
+create_virtual_sources() {
+    local num_microphones="${NUM_MICROPHONES:-1}"
+    local i=1
+
+    while [ $i -le $num_microphones ]
+    do
+        pacmd load-module module-virtual-source source_name="Microphone_${i}"
+        i=$((i + 1))
+    done
+
+    # Set default mic
+    pacmd set-default-source "Microphone_1"
+}
+
+run_vnc_server() {
+    echo "[INFO] Starting VNC server..."
+    local passwordArgument='-nopw'
+
+    if [ -n "${VNC_SERVER_PASSWORD}" ]
+    then
+        local passwordFilePath="${HOME}/x11vnc.pass"
+        if ! x11vnc -storepasswd "${VNC_SERVER_PASSWORD}" "${passwordFilePath}" 2>/dev/null
+        then
+            echo "[ERROR] Failed to store x11vnc password."
+            exit 1
+        fi
+        passwordArgument=-"-rfbauth ${passwordFilePath}"
+        echo "[INFO] The VNC server will run with a password."
+    else
+        echo "[WARN] The VNC server will run without a password."
+    fi
+
+    local viewOnlyArgument=""
+    if [ -n "${VNC_VIEW_ONLY}" ]; then
+        viewOnlyArgument="-viewonly"
+        echo "[INFO] The VNC server will run in view-only mode."
+    else
+        echo "[INFO] The VNC server will allow interactions."
+    fi
+
+    x11vnc -display :1 -rfbport 5900 -geometry $(xdpyinfo -display :1 | grep 'dimensions:' | awk '{print $2}') -noncache -forever ${passwordArgument} ${viewOnlyArgument} -q -bg & #2>/dev/null
+    VNC_pid=$!
+
+    echo "[INFO] VNC is exposed on localhost:5900"
+    echo "[PID]-${VNC_pid}"
+}
+
+run_WebSocify() {
+    if [ -n "$VNC_SERVER_ENABLED" ]; then
+        echo "[INFO] Starting WebSocify..."
+        local VNC_WS_PORT=${VNC_WS_PORT:-15900}
+        
+        if [ -z "$VNC_NO_SSL" ]; then
+            echo "VNC_NO_SSL is not set. Running command with SSL."
+            node /home/user/app/websockify/websockify.js --cert /home/user/app/websockify/cert.pem --key /home/user/app/websockify/key.pem localhost:$VNC_WS_PORT 0.0.0.0:5900 > /dev/null 2>&1 &
+        else
+            echo "VNC_NO_SSL is set. Running command without SSL."
+            node /home/user/app/websockify/websockify.js localhost:$VNC_WS_PORT 0.0.0.0:5900 > /dev/null 2>&1 &
+        fi
+
+        WebSocify_pid=$!
+
+        echo "[PID]-${WebSocify_pid}"
+    fi
+}
+
+run_mitmproxy() {
+    # Check if all arguments are provided
+    if [ -z "$PROXY_URL" ] || [ -z "$PROXY_USERNAME" ] || [ -z "$PROXY_PASSWORD" ]; then
+        echo "[WARN] Missing arguments. Please provide PROXY_PORT, url, username, and password."
+        return 1
+    fi
+
+    echo "[INFO] Starting mitmproxy..."
+    mitmdump --certs *=/home/mitmproxy/mitmproxy-ca-cert.pem -p 8081 --mode upstream:https://${PROXY_URL} --upstream-auth ${PROXY_USERNAME}:${PROXY_PASSWORD} > /dev/null 2>&1 &
+    mitmproxy_pid=$!
+
+    echo "[PID]-${mitmproxy_pid}"
+
+    # Run a health check to ensure proxy is initialized
+    start_time=$(date +%s)
+    max_attempts=15 #15 attempts with 1s delay
+    attempt=0
+
+    # Health check loop
+    while ! curl --proxy http://localhost:8081 --silent --fail http://ipinfo.io/json -o /dev/null; do
+        attempt=$((attempt + 1))
+        echo "[INFO] Waiting for mitmproxy to be ready... Attempt $attempt of $max_attempts"
+
+        # Break and resume normally after it exceeds the timeframe
+        if [ $attempt -ge $max_attempts ]; then
+            echo "[ERROR] mitmproxy did not become ready within the expected timeframe."
+            break
+        fi
+
+        sleep 1
+    done
+
+    # Calculate and log the elapsed time
+    end_time=$(date +%s)
+    elapsed_time=$(($end_time - $start_time))
+    echo "[INFO] mitmproxy is ready. Initialization took ${elapsed_time} seconds."
+}
+
+main
+exit 0

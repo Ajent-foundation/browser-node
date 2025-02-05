@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>VNC Viewer</title>
+        <link rel="stylesheet" href="styles.css">
+    </head>
+    <body>
+        <div id="main__content">
+            <div class="vnc__screen">
+                <div id="screen">
+                    <!-- This is where the remote screen will appear -->
+                </div>
+            </div>
+        </div>
+        <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/@hostnet/novnc@1.0.0/dist/novnc.min.js"></script>
+        <script type="module">
+            // Quick Example (Good for debugging)
+            // Configure your VNC connection details here
+            const VNC_HOST = '127.0.0.1'
+            const VNC_PORT = 15900  // Change this to your VNC port
+            let rfb
+            let desktopName
+
+            function connectVNC() {
+                console.log("Connecting to VNC server at " + VNC_HOST + ":" + VNC_PORT)
+                // Creating a new RFB object will start a new connection
+                rfb = new RFB(
+                    document.getElementById('screen'), 
+                    `ws://${VNC_HOST}:${VNC_PORT}`,
+                    //{ credentials: { password: "" }}
+                )
+
+                // Set parameters that can be changed on an active connection
+                rfb.viewOnly = false
+                rfb.scaleViewport = false   
+            }
+
+            $(document).ready(() => {
+                $("#disconnect__button").on("click", function() {
+                    rfb.disconnect()
+                })
+
+                // Connect immediately
+                connectVNC()
+            })
+        </script>
+    </body>
+</html>

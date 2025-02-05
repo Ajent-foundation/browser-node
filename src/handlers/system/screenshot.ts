@@ -1,0 +1,77 @@
+import { Request, Response, NextFunction } from "express"
+import { buildResponse } from "../../base/utility/express"
+import { NodeMemory, CACHE, NodeCacheKeys } from "../../base/cache"
+import { gracefulShutdown } from "../../actions"
+import { exec } from 'child_process';
+import { readFile, unlink } from 'fs/promises';  
+
+export type RequestParams = {}
+
+export type RequestBody = {}
+
+export type RequestQuery = {}
+
+export async function screenshot(
+	req:Request<RequestParams, {}, RequestBody, RequestQuery>, 
+	res:Response, 
+	next:NextFunction
+){
+    const memory = CACHE.get<NodeMemory>(NodeCacheKeys.MEMORY)
+	if(!memory) {
+		next(
+			await buildResponse(400, {
+				code: "MEMORY_NOT_FOUND",
+				message: "Cache memory not found"
+			})
+		)
+
+		setImmediate(async () => {
+			await gracefulShutdown("exit", null, true)
+		})
+		return
+	}
+
+    if (memory.isRunning) {
+        const tempPath = `/tmp/screenshot_${Date.now()}.jpg`;
+
+        try {
+            await new Promise((resolve, reject) => {
+                exec(`scrot -q 50 -f ${tempPath}`, (error) => {
+                    if (error) {
+                        reject(error);
+                    } else {
+                        resolve(true);
+                    }
+                });
+            });
+
+            // Read the file and convert to base64
+            const imageBuffer = await readFile(tempPath);
+            const base64Image = imageBuffer.toString('base64');
+
+            // Delete the temporary file
+            await unlink(tempPath);
+
+            next(
+                await buildResponse(200, {
+                    image: `data:image/jpeg;base64,${base64Image}`
+                })
+            );
+        } catch (error) {
+            console.error(error)
+            next(
+                await buildResponse(500, {
+                    code: "SCREENSHOT_FAILED",
+                    message: "Failed to capture screenshot",
+                })
+            );
+        }
+    } else {
+        next(
+            await buildResponse(400, {
+                code: "BROWSER_NOT_RUNNING",
+                message: "Browser is not running"
+            })
+        )
+    }
+}
