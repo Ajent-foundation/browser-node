@@ -84,9 +84,6 @@ npm run runContainer
 - `GET /files/download/:fileName`: Download a specific file
 - `POST /files/upload`: Upload a file to the container
 
-> **Note**: All endpoints require proper authentication and will return appropriate error codes if the browser is not running.
-
-
 ## Documentation
 
 For detailed API documentation and advanced usage, please visit our [official documentation](https://dev-docs.tasknet.co/).
