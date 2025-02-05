@@ -16,6 +16,7 @@ FROM debian
 
 # Variables
 ARG NODE_MAJOR=20
+ARG TARGETARCH
 
 # Update and clean
 RUN apt-get update && \ 
@@ -138,7 +139,7 @@ RUN if [ "$BROWSER" = "brave" ]; then \
     apt-get update && \
     apt-get install -y curl && \
     curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg && \
-    echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg arch=arm64] https://brave-browser-apt-release.s3.brave.com/ stable main" | tee /etc/apt/sources.list.d/brave-browser-release.list && \
+    echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg arch=${TARGETARCH}] https://brave-browser-apt-release.s3.brave.com/ stable main" | tee /etc/apt/sources.list.d/brave-browser-release.list && \
     apt-get update && \
     apt-get install -y brave-browser && \
     ln -s /usr/bin/brave-browser /usr/bin/google-chrome; \
