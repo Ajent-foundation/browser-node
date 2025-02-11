@@ -2,25 +2,34 @@ import { Request, Response, NextFunction } from "express"
 import { buildResponse } from "../../base/utility/express"
 import { NodeMemory, CACHE, NodeCacheKeys } from "../../base/cache"
 import { gracefulShutdown } from "../../actions"
-import { exec } from 'child_process';
-import { z } from "zod"
+import { execFile } from 'child_process';
 
-export const RequestParamsSchema = z.object({});
+export type RequestParams = {}
 
-export const RequestBodySchema = z.object({
-    key: z.string().optional(),
-    text: z.string().optional(),
-    modifiers: z.array(
-        z.enum(['ctrl', 'alt', 'shift', 'super'])
-    ).optional(),
-    type: z.enum(['keydown', 'keyup', 'type']).optional().default('type')
-});
+export type RequestBody = {
+    key?: string
+    text?: string
+    modifiers?: Array<'ctrl' | 'alt' | 'shift' | 'super'>
+    type?: 'keydown' | 'keyup' | 'type'
+}
 
-export const RequestQuerySchema = z.object({});
+export type RequestQuery = {}
 
-export type RequestParams = z.infer<typeof RequestParamsSchema>;
-export type RequestBody = z.infer<typeof RequestBodySchema>;
-export type RequestQuery = z.infer<typeof RequestQuerySchema>;
+// Add validation helpers
+const VALID_KEYS = new Set(['Return', 'space', 'BackSpace', 'Tab', /* add other valid keys */]);
+const VALID_MODIFIERS = new Set(['ctrl', 'alt', 'shift', 'super']);
+
+function validateInput(key?: string, text?: string, modifiers?: string[]) {
+    if (text && !/^[a-zA-Z0-9\s.,!?-]*$/.test(text)) {
+        throw new Error('Invalid text input');
+    }
+    if (key && !VALID_KEYS.has(key)) {
+        throw new Error('Invalid key');
+    }
+    if (modifiers?.some(mod => !VALID_MODIFIERS.has(mod))) {
+        throw new Error('Invalid modifier');
+    }
+}
 
 export async function keyboard(
 	req:Request<RequestParams, {}, RequestBody, RequestQuery>, 
@@ -44,46 +53,55 @@ export async function keyboard(
 
     if (memory.isRunning) {
         const { key, text, modifiers = [], type = 'type' } = req.body
-        if (text) {
-            // Type text directly
-            await new Promise((resolve, reject) => {
-                exec(`xdotool type "${text}"`, (error) => {
-                    if (error) reject(error)
-                    resolve(true)
-                })
-            })
-        } else if (key) {
-            let command = 'xdotool '
-            
-            // Add modifiers if present
-            if (modifiers.length > 0) {
-                if (type === 'type') {
-                    // For key combinations (e.g., Ctrl+C)
-                    command += `key ${modifiers.join('+')}+${key}`
-                } else {
-                    // For key down/up events
-                    command += `${type === 'keydown' ? 'keydown' : 'keyup'} ${modifiers.join(' ')} ${key}`
-                }
-            } else {
-                // Single key
-                if (type === 'type') {
-                    command += `key ${key}`
-                } else {
-                    command += `${type === 'keydown' ? 'keydown' : 'keyup'} ${key}`
-                }
-            }
-
-            await new Promise((resolve, reject) => {
-                exec(command, (error) => {
-                    if (error) reject(error)
-                    resolve(true)
-                })
-            })
-        }
         
-        next(
-            await buildResponse(200, {})
-        )
+        try {
+            validateInput(key, text, modifiers);
+            
+            if (text) {
+                await new Promise((resolve, reject) => {
+                    execFile('xdotool', ['type', text], (error) => {
+                        if (error) reject(error);
+                        resolve(true);
+                    });
+                });
+            } else if (key) {
+                const args: string[] = [];
+                
+                if (modifiers.length > 0) {
+                    if (type === 'type') {
+                        args.push('key', `${modifiers.join('+')}+${key}`);
+                    } else {
+                        args.push(type === 'keydown' ? 'keydown' : 'keyup', ...modifiers, key);
+                    }
+                } else {
+                    if (type === 'type') {
+                        args.push('key', key);
+                    } else {
+                        args.push(type === 'keydown' ? 'keydown' : 'keyup', key);
+                    }
+                }
+
+                await new Promise((resolve, reject) => {
+                    execFile('xdotool', args, (error) => {
+                        if (error) reject(error);
+                        resolve(true);
+                    });
+                });
+            }
+            
+            next(
+                await buildResponse(200, {})
+            )
+        } catch (error) {
+            next(
+                await buildResponse(400, {
+                    code: "INVALID_INPUT",
+                    message: error instanceof Error ? error.message : 'Unknown error',
+                    stack: error instanceof Error ? error.stack : undefined
+                })
+            );
+            return;
+        }
     } else {
         next(
             await buildResponse(400, {

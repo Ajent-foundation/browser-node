@@ -3,19 +3,14 @@ import { NodeMemory, CACHE, NodeCacheKeys } from "../../base/cache"
 import { gracefulShutdown } from "../../actions"
 import { buildResponse } from "../../base/utility/express"
 import path from "path"
-import { z } from "zod"
 
-export const RequestParamsSchema = z.object({
-    fileName: z.string().min(1)
-});
+export type RequestParams = {
+    fileName:string
+}
 
-export const RequestBodySchema = z.object({});
+export type RequestBody = {}
 
-export const RequestQuerySchema = z.object({});
-
-export type RequestParams = z.infer<typeof RequestParamsSchema>;
-export type RequestBody = z.infer<typeof RequestBodySchema>;
-export type RequestQuery = z.infer<typeof RequestQuerySchema>;
+export type RequestQuery = {}
 
 const downloadFolderPath = "/home/user/downloads"
 
@@ -40,22 +35,28 @@ export async function download(
 	}
 
     if (memory.isRunning) {
-        const filePath = path.join(downloadFolderPath, req.params.fileName)
-        res.sendFile(
-            filePath,
-            async (error) => {
-                if(error) {
-                    next(
-                        await buildResponse(404, {
-                            code: "FILE_NOT_FOUND",
-                            message: "The requested file does not exists."
-                        })
-                    )
+        // Sanitize and validate the filename to prevent path traversal
+        const sanitizedFileName = path.basename(req.params.fileName);
+        const filePath = path.join(downloadFolderPath, sanitizedFileName);
+        
+        // Verify the final path is within the downloads directory
+        const normalizedPath = path.normalize(filePath);
+        if (!normalizedPath.startsWith(path.normalize(downloadFolderPath))) {
+            return res.status(400).json({ error: 'Invalid file path' });
+        }
+        
+        res.sendFile(normalizedPath, async (error) => {
+            if(error) {
+                next(
+                    await buildResponse(404, {
+                        code: "FILE_NOT_FOUND",
+                        message: "The requested file does not exists."
+                    })
+                )
 
-                    return
-                }
+                return
             }
-        )
+        })
     } else {
         next(
             await buildResponse(400, {
