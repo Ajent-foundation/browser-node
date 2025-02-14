@@ -384,10 +384,11 @@ export async function launchBrowser(
         }
 
         // NOTE - IT crashes if wrong filter is used
-        const userAgent = new UserAgent({
+        const userAgent = new UserAgent([
+            {
             // appName: "Netscape",
             // Linux || Win32 || MacIntel
-            platform: "Win32",
+            ///platform: "Win32",
             // Google Chrome=>"Google Inc." Safari=>"Apple Computer, Inc." Firefox, EDGE=>"",
             // vendor: "Google Inc.",
             //userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
@@ -397,7 +398,7 @@ export async function launchBrowser(
             //     // wifi || ethernet || cellular
             //     type: 'wifi',
             // }
-        })
+        }])
         userAgent.random()
         // Browser Launch Configuration 
         // Extensions [ ]
@@ -413,7 +414,7 @@ export async function launchBrowser(
         const extensionArgs : string[] = []
         if(!IS_LOCAL){
             const baseExtensions : string[]= [
-                //"uBlockOrigin",
+                "uBlockOrigin",
                 "webrtc",
                 //"mhtml"
             ]
@@ -487,7 +488,7 @@ export async function launchBrowser(
 
                 // Disable
                 // "--disable-gpu",
-                "disable-infobars",
+                "--disable-infobars",
                 "--disable-sync",
                 "--disable-default-apps",
                 "--disable-datasaver-prompt",
@@ -506,17 +507,11 @@ export async function launchBrowser(
                 "--disable-new-content-rendering-timeout",
                 "--disable-dev-shm-usage",
                 "--disable-client-side-phishing-detection",
-                //"--disable-blink-features=AutomationControlled",
+                "--disable-blink-features=AutomationControlled",
                 "--disable-features=PasswordManager,AutofillAssistant,DoNotTrack,IsolateOrigins,SameSiteByDefaultCookies,LazyFrameLoading",
                 //"--disable-site-isolation-trials",
                 // "--disable-web-security",
                 "--disable-component-update",
-
-                // Add these logging-related flags at the start to suppress warnings
-                "--disable-logging",
-                "--silent",
-                "--log-level=3", // Most aggressive log suppression
-                "--v=0",
 
                 // Enable
                 "--enable-features=NetworkService,NetworkServiceInProcess",
@@ -527,8 +522,6 @@ export async function launchBrowser(
             ]
                 .concat(IS_LOCAL ? [] : [
                     "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--no-zygote",
                     "--user-data-dir=/home/user/temp",
                     //"--remote-debugging-pipe"
                 ])
@@ -551,7 +544,7 @@ export async function launchBrowser(
         )
 
         try{
-            browser = await puppeteer.launch(opts)
+            browser = await puppeteer.launch({...opts})
         }
         catch(error:unknown){
             if(error instanceof Error){
@@ -585,6 +578,8 @@ export async function launchBrowser(
             if (target.type() === 'page') {
                 const page = await target.asPage();
                 if (page) {
+                    await page.emulateTimezone("America/New_York")
+
                     const client = await page.createCDPSession()
                     await client.send('Page.setDownloadBehavior', {
                         behavior: 'allow',
