@@ -19,12 +19,26 @@ export const RequestBodySchema = z.object({
 		password: z.string()
 	}).optional(),
 	screen: z.object({
-		resolution: z.custom<SupportedResolution>()
+		resolution: z.custom<SupportedResolution>(),
+		dpi: z.enum(["96", "120", "192"]).optional(),
+		depth: z.enum(["24", "30", "32"]).optional()
 	}).optional(),
 	vnc: z.object({
 		mode: z.enum(["ro", "rw"]),
 		isPasswordProtected: z.boolean()
-	}).optional()
+	}).optional(),
+	browser: z.enum(["chrome"]).optional(),
+	numberOfCameras: z.number().min(1).max(4).optional(),
+	numberOfMicrophones: z.number().min(1).max(4).optional(),
+	numberOfSpeakers: z.number().min(1).max(4).optional(),
+	// To be added: "playwright", "selenium"
+	driver: z.enum(["puppeteer"]).default("puppeteer").optional(),
+	locale: z.string().optional(),
+	language: z.string().optional(),
+	timezone: z.string().optional(),
+	platform: z.enum(["win32", "linux", "darwin"]).optional(),
+	extensions: z.array(z.string()).optional(),
+	overrideUserAgent: z.string().optional(),
 });
 
 export const RequestQuerySchema = z.object({});
@@ -123,18 +137,29 @@ export async function launch(
 			})
 		} else {
 			let sessionID = null
-			// TODO - get sessionID somehow
 
 			// Config
 			const config: BrowserConfig = {
-				proxy: req.body.proxy
+				proxy: req.body.proxy,
+				overrideUserAgent: req.body.overrideUserAgent,
+				language: req.body.language,
+				timezone: req.body.timezone,
+				platform: req.body.platform,
+				extensions: req.body.extensions || [],
+				locale: req.body.locale,
+				numberOfCameras: req.body.numberOfCameras,
+				numberOfMicrophones: req.body.numberOfMicrophones,
+				numberOfSpeakers: req.body.numberOfSpeakers,
+				driver: req.body.driver,
 			}
 			
 			// Screen Resolution
 			if(req.body.screen && req.body.screen.resolution){
 				config.window = {
 					screen: {
-						resolution: req.body.screen.resolution
+						resolution: req.body.screen.resolution,
+						depth: req.body.screen.depth || "24",
+						dpi: req.body.screen.dpi || "96"
 					}
 				}
 			}

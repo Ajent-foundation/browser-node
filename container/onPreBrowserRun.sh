@@ -1,6 +1,7 @@
 #!/bin/bash
 
 main() {
+    setup_locale_and_timezone  # Setup locale and timezone
     change_xvfb_resolution    # Change Xvfb resolution
     run_pulseaudio            # Pulseaudio
     create_virtual_sinks      # Create virtual sinks
@@ -11,12 +12,42 @@ main() {
     run_mitmproxy             # mitmproxy
 }
 
+# New function to setup locale and timezone
+setup_locale_and_timezone() {
+    # Set locale if provided
+    if [ -n "${LOCALE}" ]; then
+        echo "[INFO] Setting locale to ${LOCALE}"
+        export LANG="${LOCALE}"
+        export LC_ALL="${LOCALE}"
+    else
+        # Default to en_US.UTF-8 if no locale specified
+        echo "[INFO] No locale specified, defaulting to en_US.UTF-8"
+        export LANG="en_US.UTF-8"
+        export LC_ALL="en_US.UTF-8"
+    fi
+
+    # Set system language if provided
+    if [ -n "${LANGUAGE}" ]; then
+        echo "[INFO] Setting system language to ${LANGUAGE}"
+        export LANGUAGE="${LANGUAGE}"
+    fi
+
+    # Set timezone if provided
+    if [ -n "${TIMEZONE}" ]; then
+        echo "[INFO] Setting timezone to ${TIMEZONE}"
+        if [ -f "/usr/share/zoneinfo/${TIMEZONE}" ]; then
+            ln -sf "/usr/share/zoneinfo/${TIMEZONE}" /etc/localtime
+            export TZ="${TIMEZONE}"
+        else
+            echo "[WARN] Invalid timezone: ${TIMEZONE}"
+        fi
+    fi
+}
+
 change_xvfb_resolution() {
     local resolution=${XVFB_RESOLUTION:-1280x1024}
-    
-    # cannot adjust those
-    # local depth=${XVFB_DEPTH:-24}
-    # local DPI=${XVFB_DPI:-96}
+    local depth=${XVFB_DEPTH:-24}
+    local DPI=${XVFB_DPI:-96}
 
     # Check if xrandr is available and can be used
     if ! which xrandr >/dev/null; then
@@ -32,12 +63,40 @@ change_xvfb_resolution() {
         return 0
     fi
 
-    # Attempt to change the resolution if it is not already set to the desired default
-    xrandr --display :1 --size ${resolution} || {
-        echo "[ERROR] Failed to set resolution to ${resolution}."
-        return 1
-    }
+   # If xrandr fails to set the new resolution
+    if ! xrandr --display :1 --size ${resolution}; then
+        # Kill all X-dependent processes first
+        pkill polybar
+        pkill openbox
+        pkill Xvfb
+        
+        # Remove the lock file
+        rm -f /tmp/.X1-lock
+        rm -f /tmp/.X11-unix/X1
+        
+        # Start new Xvfb with requested resolution
+        Xvfb :1 -screen 0 "${resolution}x24" -dpi ${DPI} -ac +extension RANDR -nolisten tcp &
+        export DISPLAY=:1
+        
+        # Wait for new Xvfb to be ready
+        while ! xdpyinfo -display :1 >/dev/null 2>&1; do
+            sleep 0.5
+        done
 
+        # Restart Openbox
+        openbox --config-file "/home/user/.config/openbox/rc.xml" &
+        
+        # Wait for Openbox to be ready
+        while ! xprop -root | grep -q _OB_VERSION; do
+            sleep 0.5
+        done
+
+        # Set wallpaper
+        feh --bg-fill /home/user/wallpapers/desktop.png &
+
+        # Restart Polybar
+        polybar -c /home/user/.config/polybar/config.ini main > /dev/null 2>&1 &
+    fi
     echo "[INFO] Resolution changed to ${resolution}."
 }
 

@@ -46,7 +46,8 @@ RUN apt-get install -y \
     xdotool \ 
     scrot \
     lsof \
-    vim
+    vim \
+    patch
 
 # Google Chrome dependencies
 RUN apt-get install -y \
@@ -63,7 +64,7 @@ RUN apt-get install -y \
     libxss1 \
     libasound2 \
     libatk-bridge2.0-0 \
-    libgtk-3-0
+    libgtk-3-0 
 
 # Install Node.js and npm
 RUN apt-get update && apt-get install -y ca-certificates curl gnupg && \
@@ -178,6 +179,10 @@ EXPOSE 15900 19222 8080
 
 WORKDIR /home/user/app
 RUN npm install --omit=dev
+
+# patch puppeteer
+RUN npx rebrowser-patches@latest patch --packageName puppeteer-core
+RUN npx rebrowser-patches@latest patch --packageName playwright-core
 
 # Download and install websockify
 WORKDIR /home/user/app/websockify
