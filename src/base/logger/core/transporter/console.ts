@@ -78,7 +78,7 @@ export class ConsoleTransporter implements ICoreTransporter {
 
     private _getMetadataString(metadata:{[key: string] : string}) : [string, any[]] {
         let metadataString = ""
-        let objects = []
+        let objects : unknown[] = []
 
         for (let key in metadata) {
             if (metadata.hasOwnProperty(key)) {

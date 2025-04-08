@@ -7,7 +7,6 @@ main() {
     run_polybar               # Polybar a status bar
 }
 
-// NOTE - Tt be moved out of boot to allow custom resolution/
 run_xvfb() {
     echo "[INFO] Starting Xvfb..."
 

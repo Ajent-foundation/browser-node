@@ -1,4 +1,4 @@
-import puppeteer, { Browser } from "puppeteer"
+import puppeteer, { Browser, LaunchOptions as PuppeteerLaunchOptions } from "puppeteer"
 import { LOGGER } from "../../base/logger"
 import { configVars } from "../../base/env"
 import { sleep } from "../../base/utility/helpers"
@@ -93,18 +93,30 @@ async function runOnPreBrowserRunScript(
     resolution: string,
     depth: number,
     dpi: number,
+    language: string,
+    timezone: string,
+    locale: string,
+    numberOfCameras: number,
+    numberOfMicrophones: number,
+    numberOfSpeakers: number,
     proxy ?: {
         url: string
         username: string
         password: string
-    }
+    },
 ): Promise<number[]> {
     //WINDOW
     const windowVars : Record<string, string> = {}
     windowVars["XVFB_RESOLUTION"] = resolution
     windowVars["XVFB_DEPTH"] = depth.toString()
     windowVars["XVFB_DPI"] = dpi.toString()
-    
+    windowVars["LANGUAGE"] = language
+    windowVars["TIMEZONE"] = timezone
+    windowVars["NUM_CAMERAS"] = numberOfCameras.toString()
+    windowVars["NUM_MICROPHONES"] = numberOfMicrophones.toString()
+    windowVars["NUM_SPEAKERS"] = numberOfSpeakers.toString()
+    windowVars["LOCALE"] = locale
+
     // VNC vars
     const vncVars : Record<string, string> = {}
     if(enableVNC){
@@ -214,11 +226,11 @@ export type SupportedResolution = "1280x1024" | "1920x1080" | "1366x768" | "1536
 
 export interface BrowserConfig {
     window ?: {
-        browser ?: "chrome" | "edge" | "opera" | "brave"
+        browser ?: "chrome"
         screen ?:{
             resolution ?: SupportedResolution
-            depth ?: 24 | 30 | 32
-            dpi ?: 96 | 120 | 144 | 192
+            depth ?: "24" | "30" | "32"
+            dpi ?: "96" | "120" | "144" | "192"
         }
     }
     vnc ?: {
@@ -232,9 +244,16 @@ export interface BrowserConfig {
         password : string
         validate ?: boolean
     }
-    //userAgent?: string
-    //cookies?: { [name: string]: string }
-    //extensions?: string[]
+    driver ?: "puppeteer" | "playwright" | "selenium"
+    language ?: string
+    timezone ?: string
+    platform ?: string
+    extensions : string[]
+    locale ?: string
+    numberOfCameras ?: number
+    numberOfMicrophones ?: number
+    numberOfSpeakers ?: number
+    overrideUserAgent ?: string
 }
 
 interface proxyInfo {
@@ -273,6 +292,19 @@ export async function launchBrowser(
     const WINDOW_SCREEN_RESOLUTION = config.window?.screen?.resolution || "1280x1024"
     const WINDOW_SCREEN_DEPTH = config.window?.screen?.depth || 24
     const WINDOW_SCREEN_DPI = config.window?.screen?.dpi || 96
+
+
+    // Driver
+    const DRIVER = config.driver || "puppeteer"
+    const PLATFORM = config.platform || "win32"
+    const EXTENSIONS = config.extensions || []
+    const LOCALE = config.locale || "en-US"
+    const NUMBER_OF_CAMERAS = config.numberOfCameras || 1
+    const NUMBER_OF_MICROPHONES = config.numberOfMicrophones || 1
+    const NUMBER_OF_SPEAKERS = config.numberOfSpeakers || 1
+    const LANGUAGE = config.language || "en-US"
+    const TIMEZONE = config.timezone || "America/New_York"
+    const OVERRIDE_USER_AGENT = config.overrideUserAgent || ""
 
     try {
         // STEP 1: Validate Proxy
@@ -342,8 +374,14 @@ export async function launchBrowser(
                     VNC_IS_PASSWORD_PROTECTED,
                     VNC_MODE === "ro",
                     WINDOW_SCREEN_RESOLUTION,
-                    WINDOW_SCREEN_DEPTH,
-                    WINDOW_SCREEN_DPI,
+                    Number(WINDOW_SCREEN_DEPTH),
+                    Number(WINDOW_SCREEN_DPI),
+                    LANGUAGE,
+                    TIMEZONE,
+                    LOCALE,
+                    NUMBER_OF_CAMERAS,
+                    NUMBER_OF_MICROPHONES,
+                    NUMBER_OF_SPEAKERS,
                     config.proxy && isProxyValidated ? config.proxy : undefined
                 )
             } catch (error:unknown) {
@@ -384,8 +422,10 @@ export async function launchBrowser(
         }
 
         // NOTE - IT crashes if wrong filter is used
-        const userAgent = new UserAgent([
+        const userAgent = OVERRIDE_USER_AGENT ? OVERRIDE_USER_AGENT : new UserAgent([
             {
+                deviceCategory: "desktop",
+                //platform: PLATFORM,
             // appName: "Netscape",
             // Linux || Win32 || MacIntel
             ///platform: "Win32",
@@ -398,8 +438,7 @@ export async function launchBrowser(
             //     // wifi || ethernet || cellular
             //     type: 'wifi',
             // }
-        }])
-        userAgent.random()
+        }]).random()
         // Browser Launch Configuration 
         // Extensions [ ]
         // useData
@@ -451,12 +490,17 @@ export async function launchBrowser(
         // } else {
         //     appName = "google-chrome"
         // }
-        const opts = {
+        // https://github.com/GoogleChrome/chrome-launcher/blob/main/docs/chrome-flags-for-tools.md#--enable-automation
+        const opts: PuppeteerLaunchOptions = {
             executablePath: IS_LOCAL ? undefined : `/usr/bin/${appName}`,
             //userDataDir: IS_LOCAL ? undefined : '/home/user/temp',
             headless: false,
             env: IS_LOCAL ? undefined : {
                 DISPLAY: ":1",
+                LANG: LOCALE,
+                LC_ALL: LOCALE,
+                LANGUAGE: LANGUAGE,
+                TZ: TIMEZONE,
             },
             pipe: false,
             args: [
@@ -531,8 +575,15 @@ export async function launchBrowser(
                     "--ssl-key-log-file=/home/mitmproxy/mitmproxy-ca-cert.pem"
                 ] : [])
                 .concat(extensionArgs),
+                defaultViewport: {
+                    width: Number(WINDOW_SCREEN_RESOLUTION.split("x")[0]),
+                    height: Number(WINDOW_SCREEN_RESOLUTION.split("x")[1])
+                },
                 //ignoreDefaultArgs: ['--enable-automation'],
-                ignoreDefaultArgs: true
+                ignoreDefaultArgs: [
+                    "--enable-automation",
+                    "--enable-blink-features=IdleDetection"
+                ],
         }
 
         LOGGER.info(
@@ -615,12 +666,17 @@ export async function launchBrowser(
 
                 const pages = await connection.pages()
                 if(pages.length!==0){
-                    await connection.newPage()
+                    const newPage =await connection.newPage()
                     await pages[0].close()
+
+                    // Set Viewport
+                    await newPage.setViewport({
+                        width: Number(WINDOW_SCREEN_RESOLUTION.split("x")[0]),
+                        height: Number(WINDOW_SCREEN_RESOLUTION.split("x")[1])
+                    })
                 }
 
                 connection.disconnect()
-
                 LOGGER.info(
                     `Connected successfully to browser after ${attempt} attempts`,
                 )

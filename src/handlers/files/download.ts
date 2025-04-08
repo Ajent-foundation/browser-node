@@ -3,14 +3,20 @@ import { NodeMemory, CACHE, NodeCacheKeys } from "../../base/cache"
 import { gracefulShutdown } from "../../actions"
 import { buildResponse } from "../../base/utility/express"
 import path from "path"
+import { z } from "zod"
 
-export type RequestParams = {
-    fileName:string
-}
+export const RequestParamsSchema = z.object({
+    fileName: z.string()
+});
 
-export type RequestBody = {}
+export const RequestBodySchema = z.object({});
 
-export type RequestQuery = {}
+export const RequestQuerySchema = z.object({});
+
+export type RequestParams = z.infer<typeof RequestParamsSchema>;
+export type RequestBody = z.infer<typeof RequestBodySchema>;
+export type RequestQuery = z.infer<typeof RequestQuerySchema>;
+
 
 const downloadFolderPath = "/home/user/downloads"
 
@@ -42,7 +48,8 @@ export async function download(
         // Verify the final path is within the downloads directory
         const normalizedPath = path.normalize(filePath);
         if (!normalizedPath.startsWith(path.normalize(downloadFolderPath))) {
-            return res.status(400).json({ error: 'Invalid file path' });
+            res.status(400).json({ error: 'Invalid file path' });
+            return
         }
         
         res.sendFile(normalizedPath, async (error) => {
