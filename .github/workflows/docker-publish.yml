@@ -92,7 +92,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             BROWSER=brave
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64,linux/arm64,windows/amd64
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
