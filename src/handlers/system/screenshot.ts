@@ -4,12 +4,19 @@ import { NodeMemory, CACHE, NodeCacheKeys } from "../../base/cache"
 import { gracefulShutdown } from "../../actions"
 import { exec } from 'child_process';
 import { readFile, unlink } from 'fs/promises';  
+import { z } from "zod"
 
-export type RequestParams = {}
+export const RequestParamsSchema = z.object({});
 
-export type RequestBody = {}
+export const RequestBodySchema = z.object({
+    quality: z.number().optional()
+});
 
-export type RequestQuery = {}
+export const RequestQuerySchema = z.object({});
+
+export type RequestParams = z.infer<typeof RequestParamsSchema>;
+export type RequestBody = z.infer<typeof RequestBodySchema>;
+export type RequestQuery = z.infer<typeof RequestQuerySchema>;
 
 export async function screenshot(
 	req:Request<RequestParams, {}, RequestBody, RequestQuery>, 
@@ -32,11 +39,12 @@ export async function screenshot(
 	}
 
     if (memory.isRunning) {
+        const { quality } = RequestBodySchema.parse(req.body)
         const tempPath = `/tmp/screenshot_${Date.now()}.jpg`;
 
         try {
             await new Promise((resolve, reject) => {
-                exec(`scrot -q 50 -f ${tempPath}`, (error) => {
+                exec(`scrot -q ${quality ? quality : 50} -f ${tempPath}`, (error) => {
                     if (error) {
                         reject(error);
                     } else {
