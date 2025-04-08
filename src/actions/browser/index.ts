@@ -296,7 +296,7 @@ export async function launchBrowser(
 
     // Driver
     const DRIVER = config.driver || "puppeteer"
-    const PLATFORM = config.platform || "windows"
+    const PLATFORM = config.platform || "win32"
     const EXTENSIONS = config.extensions || []
     const LOCALE = config.locale || "en-US"
     const NUMBER_OF_CAMERAS = config.numberOfCameras || 1
