@@ -8,8 +8,9 @@ main() {
     create_virtual_sources    # Create virtual sources
     # create_virtual_cameras    # Create virtual cameras
     run_vnc_server            # VNC server
-    run_WebSocify             # VNC WebSocify
+    run_OldWebSocify             # VNC WebSocify
     run_mitmproxy             # mitmproxy
+    run_NewWebSocify      # Websocket server
 }
 
 # New function to setup locale and timezone
@@ -187,9 +188,14 @@ run_vnc_server() {
     echo "[PID]-${VNC_pid}"
 }
 
-run_WebSocify() {
+run_OldWebSocify() {
+    # Only run old websockify if NEW_WEBSOCKIFY_ENABLED is false
+    if [ "${NEW_WEBSOCKIFY_ENABLED:-false}" = "true" ]; then
+        return
+    fi
+    
     if [ -n "$VNC_SERVER_ENABLED" ]; then
-        echo "[INFO] Starting WebSocify..."
+        echo "[INFO] Starting Old WebSocify..."
         local VNC_WS_PORT=${VNC_WS_PORT:-15900}
         
         if [ -z "$VNC_NO_SSL" ]; then
@@ -199,9 +205,9 @@ run_WebSocify() {
             echo "VNC_NO_SSL is set. Running command without SSL."
             node /home/user/app/websockify/websockify.js localhost:$VNC_WS_PORT 0.0.0.0:5900 > /dev/null 2>&1 &
         fi
-
+    
         WebSocify_pid=$!
-
+    
         echo "[PID]-${WebSocify_pid}"
     fi
 }
@@ -242,6 +248,37 @@ run_mitmproxy() {
     end_time=$(date +%s)
     elapsed_time=$(($end_time - $start_time))
     echo "[INFO] mitmproxy is ready. Initialization took ${elapsed_time} seconds."
+}
+
+run_NewWebSocify() {
+    # Only run new websockify if NEW_WEBSOCKIFY_ENABLED is true
+    if [ "${NEW_WEBSOCKIFY_ENABLED:-false}" != "true" ]; then
+        return
+    fi
+
+    # get max connections from env along with other params
+    local max_connections=${MAX_CONNECTIONS:-10}
+    local password=${VNC_SERVER_PASSWORD:-}
+    local VNC_WS_PORT=${VNC_WS_PORT:-15900}
+
+    echo "[INFO] Starting New WebSocify..."
+    # Set NODE_OPTIONS as an environment variable before the command
+    export NODE_OPTIONS=--openssl-legacy-provider
+    cmd="node /home/user/app/websockify/main.js --port ${VNC_WS_PORT} --target-host localhost --target-port 5900 --max-connections ${max_connections}"
+    
+    # Add password only if provided
+    if [ -n "$password" ]; then
+        cmd="$cmd --password $password"
+    fi
+    
+    echo "$cmd"
+    $cmd > /dev/null 2>&1 &
+    NewWebSocify_pid=$!
+    
+    # Only return PID if process is running
+    if ps -p $NewWebSocify_pid > /dev/null; then
+        echo "[PID]-${NewWebSocify_pid}"
+    fi
 }
 
 main

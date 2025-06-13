@@ -23,6 +23,7 @@ export const RequestBodySchema = z.object({
 		dpi: z.enum(["96", "120", "192"]).optional(),
 		depth: z.enum(["24", "30", "32"]).optional()
 	}).optional(),
+	vncVersion: z.enum(["legacy", "new"]).optional(),
 	vnc: z.object({
 		mode: z.enum(["ro", "rw"]),
 		isPasswordProtected: z.boolean()
@@ -167,6 +168,16 @@ export async function launch(
 			// VNC
 			if(req.body.vnc){
 				config.vnc = req.body.vnc
+				config.vnc.version = req.body.vncVersion || "legacy"
+			}
+
+			// VNC Version
+			if(!config.vnc && req.body.vncVersion === "new"){
+				config.vnc = {
+					isPasswordProtected: true,
+					mode: "rw",
+					version: "new"
+				}
 			}
 
 			// 1- Launch browser

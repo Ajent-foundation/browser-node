@@ -55,7 +55,13 @@ export async function runOnBootScript(): Promise<number[]> {
         const bootScript = spawn(
             "sh", [
                 "/home/onBoot.sh"
-            ]
+            ], {
+                env: {
+                    ...process.env,
+                    DISPLAY: ':1',
+                    PATH: process.env.PATH || '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+                }
+            }
         )
         const pids: number[] = []
 
@@ -87,6 +93,7 @@ export async function runOnBootScript(): Promise<number[]> {
 }
 
 async function runOnPreBrowserRunScript(
+    isLegacyVNC:boolean,
     enableVNC:boolean,
     secureVNC:boolean,
     isVNCViewOnly:boolean,
@@ -121,15 +128,25 @@ async function runOnPreBrowserRunScript(
     const vncVars : Record<string, string> = {}
     if(enableVNC){
         vncVars["VNC_SERVER_ENABLED"] = "TRUE"
-        if (secureVNC && process.env.API_KEY) {
+        if (isLegacyVNC && secureVNC && process.env.API_KEY) {
             vncVars["VNC_SERVER_PASSWORD"] = process.env.API_KEY
         }
-        if(isVNCViewOnly){
+        if(isLegacyVNC && isVNCViewOnly){
             vncVars["VNC_VIEW_ONLY"] = "TRUE"
         }
         if(process.env.VNC_NO_SSL === "true"){
             vncVars["VNC_NO_SSL"] = "true"
         }
+
+        if(!isLegacyVNC && process.env.API_KEY){
+            vncVars["VNC_SERVER_PASSWORD"] = process.env.API_KEY
+        }
+    }
+
+    if(isLegacyVNC){
+        vncVars["NEW_WEBSOCKIFY_ENABLED"] = "false"
+    } else {
+        vncVars["NEW_WEBSOCKIFY_ENABLED"] = "true"
     }
 
     // PROXY vars
@@ -237,6 +254,7 @@ export interface BrowserConfig {
         mode ?: "ro" | "rw"
         isPasswordProtected ?: boolean
         isEnabled ?: boolean
+        version ?: "legacy" | "new"
     }
     proxy ?: {
         url : string
@@ -286,7 +304,8 @@ export async function launchBrowser(
     const VNC_MODE = config.vnc?.mode || "rw"
     const VNC_IS_PASSWORD_PROTECTED = config.vnc?.isPasswordProtected || false
     const VNC_IS_ENABLED = config.vnc?.isEnabled || true
-
+    const VNC_VERSION = config.vnc?.version || "legacy"
+    
     // Window
     const WINDOW_BROWSER = config.window?.browser || "chrome"
     const WINDOW_SCREEN_RESOLUTION = config.window?.screen?.resolution || "1280x1024"
@@ -370,6 +389,7 @@ export async function launchBrowser(
         if(!IS_LOCAL){
             try {
                 pids = await runOnPreBrowserRunScript(
+                    VNC_VERSION === "legacy",
                     VNC_IS_ENABLED,
                     VNC_IS_PASSWORD_PROTECTED,
                     VNC_MODE === "ro",
