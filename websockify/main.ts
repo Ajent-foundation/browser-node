@@ -67,7 +67,8 @@ export class VNCManager {
         vncHost: string, 
         vncPort: number, 
         vncPassword?: string, 
-        maxConnections: number = 10
+        maxConnections: number = 10,
+        preRegisteredApiKey?: string
     ) {
         this._logger = pino({
             name: 'vnc-manager',
@@ -80,9 +81,17 @@ export class VNCManager {
         this._password = vncPassword;
         this._maxConnections = maxConnections;
         
-        // If password is provided, set it as a default API key
+        // Pre-register API keys
         if (this._password) {
             this._registeredApiKeys.add(this._password);
+        }
+        
+        if (preRegisteredApiKey) {
+            this._registeredApiKeys.add(preRegisteredApiKey);
+            this._logger.info({
+                message: 'Pre-registered API key from CLI',
+                apiKey: preRegisteredApiKey
+            }, "API_KEY_PRE_REGISTERED");
         }
 
         // Express Server & Socket Server
@@ -786,6 +795,7 @@ interface IAppOptions {
     targetHost: string;
     password?: string;
     maxConnections: string;
+    apiKey?: string;
 }
 program
     .option('--port <number>', 'Port to listen on', '15900')
@@ -793,6 +803,7 @@ program
     .requiredOption('--target-host <host>', 'VNC server host')
     .option('--password <password>', 'VNC server password')
     .option('--max-connections <number>', 'Maximum number of concurrent connections', '10')
+    .option('--api-key <key>', 'Pre-register an API key for client connections')
     .parse();
 
 const options = program.opts<IAppOptions>();
@@ -800,6 +811,7 @@ const vncManager = new VNCManager(
     options.targetHost,
     parseInt(options.targetPort, 10),
     options.password,
-    parseInt(options.maxConnections, 10)
+    parseInt(options.maxConnections, 10),
+    options.apiKey
 );
 vncManager.start(parseInt(options.port, 10));
