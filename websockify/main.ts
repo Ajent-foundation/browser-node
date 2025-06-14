@@ -419,12 +419,22 @@ export class VNCManager {
 
             // Parse query params
             const url = parseUrl(req.url || '', true);
-            let clientId = url.query.clientId as string;
-            const apiKey = url.query.apiKey as string;
+            let clientId = url.query.clientId;
+            let apiKey = url.query.apiKey;
+
+            // if client is is a string item array then convert it to a string
+            if (Array.isArray(clientId)) {
+                clientId = clientId[0];
+            }
+
+            // if api key is is a string item array then convert it to a string
+            if (Array.isArray(apiKey)) {
+                apiKey = apiKey[0];
+            }
 
             // client must be a string if provided
             if (clientId && typeof clientId !== 'string') {
-                ws.close(1007, 'Invalid clientId');
+                ws.close(1007, `Invalid clientId: ${clientId} because it is of type ${typeof clientId} and not a string`);
                 return;
             }
 
@@ -440,7 +450,7 @@ export class VNCManager {
             }
 
             if (this._clients.size >= this._maxConnections) {
-                ws.close(1013, 'Maximum connections reached');
+                ws.close(1013, `Maximum connections reached: ${this._clients.size} >= ${this._maxConnections}`);
                 return;
             }
 
