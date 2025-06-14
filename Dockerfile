@@ -83,6 +83,7 @@ RUN useradd user && \
     mkdir /home/user/.config && \
     mkdir /home/user/.config/openbox && \
     mkdir /home/user/.config/polybar && \
+    mkdir /home/user/.themes && \
     mkdir -p /home/user/.local/share/fonts && \
     mkdir /home/user/app && \
     mkdir /home/user/extensions && \
@@ -179,10 +180,6 @@ EXPOSE 15900 19222 8080
 
 WORKDIR /home/user/app
 RUN npm install --omit=dev
-
-# patch puppeteer
-RUN npx rebrowser-patches@latest patch --packageName puppeteer-core
-RUN npx rebrowser-patches@latest patch --packageName playwright-core
 
 # Download and install websockify
 WORKDIR /home/user/app/websockify

@@ -52,7 +52,18 @@ export class VNCManager {
     private _vncServerInit: Buffer | null = null;
     private _realWidth: number = 0;
     private _realHeight: number = 0;
-    private _realPixelFormat: any = null;
+    private _realPixelFormat: {
+        bitsPerPixel: number;
+        depth: number;
+        bigEndianFlag: number;
+        trueColorFlag: number;
+        redMax: number;
+        greenMax: number;
+        blueMax: number;
+        redShift: number;
+        greenShift: number;
+        blueShift: number;
+    } | null = null;
 
     // Store VNC handshake data for new clients
     private _vncHandshakeData: Buffer[] = [];
@@ -62,6 +73,9 @@ export class VNCManager {
     private _registeredApiKeys: Set<string> = new Set();
     private _clients: Map<string, ClientInfo> = new Map();
     private _currentController: string | null = null;
+    
+    // Pre-configured client permissions (for clients not yet connected)
+    private _clientPermissions: Map<string, { hasControl: boolean }> = new Map();
 
     constructor(
         vncHost: string, 
@@ -161,45 +175,74 @@ export class VNCManager {
             }
         });
 
-        // Get all connected clients
+        // Get all clients (connected and pre-configured)
         this._app.get('/clients', (req: Request, res: Response): void => {
-            const clients = Array.from(this._clients.entries()).map(([clientId, client]) => ({
-                clientId,
+            const connectedClients = Array.from(this._clients.entries()).map(([clientId, client]) => ({
+                clientId: client.id,
                 hasControl: client.hasControl,
-                isController: clientId === this._currentController
+                isController: clientId === this._currentController,
+                isConnected: true
             }));
-            res.status(200).json({ clients });
+            
+            const preConfiguredClients = Array.from(this._clientPermissions.entries())
+                .filter(([clientId]) => !this._clients.has(clientId))
+                .map(([clientId, permissions]) => ({
+                    clientId,
+                    hasControl: permissions.hasControl,
+                    isController: false,
+                    isConnected: false
+                }));
+            
+            const allClients = [...connectedClients, ...preConfiguredClients];
+            res.status(200).json({ clients: allClients });
+        });
+
+        // Get pre-configured client permissions
+        this._app.get('/clients/permissions', (req: Request, res: Response): void => {
+            const permissions = Array.from(this._clientPermissions.entries()).map(([clientId, perms]) => ({
+                clientId,
+                hasControl: perms.hasControl
+            }));
+            res.status(200).json({ permissions });
         });
 
         // Control Api
-        // Assign control to a client
+        // Assign control to a client (works for connected and disconnected clients)
         this._app.post('/clients/:clientId/control', (req: Request, res: Response): void => {
             const { clientId } = req.params;
             
-            // Find client by clientId
+            // Find connected client by clientId
             const clientEntry = Array.from(this._clients.entries()).find(([_, client]) => client.id === clientId);
-            if (!clientEntry) {
-                res.status(404).json({ code: "CLIENT_NOT_FOUND", message: "Client not found" });
-                return;
+            
+            if (clientEntry) {
+                // Client is connected - assign control immediately
+                this.assignControl(clientEntry[0]);
+                res.status(200).json({ message: "Control assigned to connected client" });
+            } else {
+                // Client is not connected - store permission for when they connect
+                this._clientPermissions.set(clientId, { hasControl: true });
+                res.status(200).json({ message: "Control permission set for disconnected client" });
             }
-
-            this.assignControl(clientEntry[0]);
-            res.status(200).json({});
         });
 
-        // Release control from a client
+        // Release control from a client (works for connected and disconnected clients)
         this._app.delete('/clients/:clientId/control', (req: Request, res: Response): void => {
             const { clientId } = req.params;
             
-            // Find client by clientId
+            // Find connected client by clientId
             const clientEntry = Array.from(this._clients.entries()).find(([_, client]) => client.id === clientId);
-            if (!clientEntry) {
+            
+            if (clientEntry) {
+                // Client is connected - release control immediately
+                this.releaseControl(clientEntry[0]);
+                res.status(200).json({ message: "Control released from connected client" });
+            } else if (this._clientPermissions.has(clientId)) {
+                // Client is not connected but has pre-configured permissions - remove them
+                this._clientPermissions.delete(clientId);
+                res.status(200).json({ message: "Control permission removed for disconnected client" });
+            } else {
                 res.status(404).json({ code: "CLIENT_NOT_FOUND", message: "Client not found" });
-                return;
             }
-
-            this.releaseControl(clientEntry[0]);
-            res.status(200).json({});
         });
     }
 
@@ -401,17 +444,33 @@ export class VNCManager {
                 return;
             }
 
+            // Check if this client has pre-configured permissions
+            const preConfiguredPermissions = this._clientPermissions.get(clientId);
+            const hasControl = preConfiguredPermissions?.hasControl || false;
+            
             const clientInfo: ClientInfo = {
                 id: clientId,
                 apiKey: apiKey,
                 socket: ws,
-                isReadOnly: true,
-                hasControl: false,
+                isReadOnly: !hasControl,
+                hasControl: hasControl,
                 protocolVersion: null,
                 securityType: null,
                 authenticated: false
             };
             this._clients.set(clientId, clientInfo);
+            
+            // If this client has control permission, make them the controller
+            if (hasControl) {
+                // Release control from current controller first
+                if (this._currentController && this._currentController !== clientId) {
+                    this.releaseControl(this._currentController);
+                }
+                this._currentController = clientId;
+                
+                // Remove from pre-configured permissions since they're now connected
+                this._clientPermissions.delete(clientId);
+            }
             this._logger.info({
                 clientId: clientId,
                 apiKey: apiKey,
@@ -603,10 +662,8 @@ export class VNCManager {
 
                 // Handle SetEncodings (type 2) [IGNORED]
                 if (messageType === 2) {
-                    //console.log('Received SetEncodings');
                     // Parse the encodings from the message
                     const numEncodings = msg.readUInt16BE(2);
-                    //console.log('Client requested encodings:', numEncodings);
                     
                     // Read each encoding
                     for (let i = 0; i < numEncodings; i++) {
