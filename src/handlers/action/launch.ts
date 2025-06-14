@@ -4,6 +4,7 @@ import { NodeMemory, NodeCacheKeys, CACHE } from "../../base/cache"
 import { buildResponse } from "../../base/utility/express"
 import { SMGR_API } from "../../apis"
 import { podVars } from "../../base/env"
+import { FingerprintingProtection, ProfileManager, IPGeolocation } from '../../actions/browser/fingerprinting';
 import { launchBrowser, BrowserConfig, SupportedResolution } from "../../actions/browser"
 import { gracefulShutdown } from "../../actions"
 import { scheduleTermination } from "./lease"
@@ -23,6 +24,7 @@ export const RequestBodySchema = z.object({
 		dpi: z.enum(["96", "120", "192"]).optional(),
 		depth: z.enum(["24", "30", "32"]).optional()
 	}).optional(),
+	vncVersion: z.enum(["legacy", "new"]).optional(),
 	vnc: z.object({
 		mode: z.enum(["ro", "rw"]),
 		isPasswordProtected: z.boolean()
@@ -39,6 +41,17 @@ export const RequestBodySchema = z.object({
 	platform: z.enum(["win32", "linux", "darwin"]).optional(),
 	extensions: z.array(z.string()).optional(),
 	overrideUserAgent: z.string().optional(),
+	fingerprinting: z.object({
+		enabled: z.boolean().optional().default(true),
+		profile: z.string().optional(), // Profile name or "random" for weighted random selection
+		hardwareConcurrency: z.number().min(1).max(32).optional(),
+		deviceMemory: z.number().min(1).max(64).optional(),
+		maxTouchPoints: z.number().min(0).max(10).optional(),
+		timezone: z.string().optional(),
+		language: z.string().optional(),
+		languages: z.array(z.string()).optional(),
+		locale: z.string().optional()
+	}).optional().default({}),
 });
 
 export const RequestQuerySchema = z.object({});
@@ -138,7 +151,7 @@ export async function launch(
 		} else {
 			let sessionID = null
 
-			// Config
+			// Config - will be updated with IP-adjusted values later
 			const config: BrowserConfig = {
 				proxy: req.body.proxy,
 				overrideUserAgent: req.body.overrideUserAgent,
@@ -151,6 +164,7 @@ export async function launch(
 				numberOfMicrophones: req.body.numberOfMicrophones,
 				numberOfSpeakers: req.body.numberOfSpeakers,
 				driver: req.body.driver,
+				fingerprinting: req.body.fingerprinting,
 			}
 			
 			// Screen Resolution
@@ -167,12 +181,62 @@ export async function launch(
 			// VNC
 			if(req.body.vnc){
 				config.vnc = req.body.vnc
+				config.vnc.version = req.body.vncVersion || "legacy"
 			}
 
-			// 1- Launch browser
+			// VNC Version
+			if(!config.vnc && req.body.vncVersion === "new"){
+				config.vnc = {
+					isPasswordProtected: true,
+					mode: "rw",
+					version: "new"
+				}
+			}
+
+			// Create fingerprinting protection with profile support and IP-based adjustment
+			let fingerprintingProtection: FingerprintingProtection | null = null;
+			let fingerprintingConfig = req.body.fingerprinting || {};
+			
+			if (fingerprintingConfig.enabled !== false) { // Default to enabled
+				// Adjust fingerprinting config based on IP geolocation using IPInfo.io
+				try {
+					const adjustedConfig = await IPGeolocation.adjustConfigForIP(fingerprintingConfig);
+					// Merge the adjusted config back, preserving the original structure
+					fingerprintingConfig = {
+						...fingerprintingConfig,
+						...adjustedConfig
+					};
+				} catch (error) {
+					// Failed to adjust config based on IP, using original config
+				}
+				
+				// Extract criteria from request for intelligent profile matching
+				const requestCriteria = {
+					platform: req.body.platform,
+					timezone: req.body.timezone || fingerprintingConfig.timezone,
+					language: req.body.language || fingerprintingConfig.language,
+					locale: req.body.locale || fingerprintingConfig.locale
+				};
+				
+				fingerprintingProtection = new FingerprintingProtection(fingerprintingConfig, requestCriteria);
+				
+				// Update the main browser config with IP-adjusted values
+				if (fingerprintingConfig.timezone) {
+					config.timezone = fingerprintingConfig.timezone;
+				}
+				if (fingerprintingConfig.language) {
+					config.language = fingerprintingConfig.language;
+				}
+				if (fingerprintingConfig.locale) {
+					config.locale = fingerprintingConfig.locale;
+				}
+			}
+
+			// 1- Launch browser (pass the IP-adjusted fingerprinting protection)
 			const browserRes = await launchBrowser(
 				sessionID || memory.browserID,
-				config
+				config,
+				fingerprintingProtection
 			)
 			if(!browserRes) {
 				next(

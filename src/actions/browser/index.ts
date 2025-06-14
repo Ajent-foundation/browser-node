@@ -1,4 +1,5 @@
 import puppeteer, { Browser, LaunchOptions as PuppeteerLaunchOptions } from "puppeteer"
+import { createFingerprintingProtection, FingerprintingProtection } from "./fingerprinting"
 import { LOGGER } from "../../base/logger"
 import { configVars } from "../../base/env"
 import { sleep } from "../../base/utility/helpers"
@@ -55,7 +56,13 @@ export async function runOnBootScript(): Promise<number[]> {
         const bootScript = spawn(
             "sh", [
                 "/home/onBoot.sh"
-            ]
+            ], {
+                env: {
+                    ...process.env,
+                    DISPLAY: ':1',
+                    PATH: process.env.PATH || '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+                }
+            }
         )
         const pids: number[] = []
 
@@ -87,6 +94,7 @@ export async function runOnBootScript(): Promise<number[]> {
 }
 
 async function runOnPreBrowserRunScript(
+    isLegacyVNC:boolean,
     enableVNC:boolean,
     secureVNC:boolean,
     isVNCViewOnly:boolean,
@@ -121,15 +129,25 @@ async function runOnPreBrowserRunScript(
     const vncVars : Record<string, string> = {}
     if(enableVNC){
         vncVars["VNC_SERVER_ENABLED"] = "TRUE"
-        if (secureVNC && process.env.API_KEY) {
+        if (isLegacyVNC && secureVNC && process.env.API_KEY) {
             vncVars["VNC_SERVER_PASSWORD"] = process.env.API_KEY
         }
-        if(isVNCViewOnly){
+        if(isLegacyVNC && isVNCViewOnly){
             vncVars["VNC_VIEW_ONLY"] = "TRUE"
         }
         if(process.env.VNC_NO_SSL === "true"){
             vncVars["VNC_NO_SSL"] = "true"
         }
+
+        if(!isLegacyVNC && process.env.API_KEY){
+            vncVars["VNC_SERVER_PASSWORD"] = process.env.API_KEY
+        }
+    }
+
+    if(isLegacyVNC){
+        vncVars["NEW_WEBSOCKIFY_ENABLED"] = "false"
+    } else {
+        vncVars["NEW_WEBSOCKIFY_ENABLED"] = "true"
     }
 
     // PROXY vars
@@ -237,6 +255,7 @@ export interface BrowserConfig {
         mode ?: "ro" | "rw"
         isPasswordProtected ?: boolean
         isEnabled ?: boolean
+        version ?: "legacy" | "new"
     }
     proxy ?: {
         url : string
@@ -254,6 +273,12 @@ export interface BrowserConfig {
     numberOfMicrophones ?: number
     numberOfSpeakers ?: number
     overrideUserAgent ?: string
+    fingerprinting ?: {
+        enabled ?: boolean
+        hardwareConcurrency ?: number
+        deviceMemory ?: number
+        maxTouchPoints ?: number
+    }
 }
 
 interface proxyInfo {
@@ -271,7 +296,8 @@ interface proxyInfo {
 
 export async function launchBrowser(
     sessionID: string,
-    config: BrowserConfig
+    config: BrowserConfig,
+    fingerprintingProtectionInstance?: FingerprintingProtection | null
 ) : Promise<SuccessBrowserLaunchResponse|null> {    
     const IS_LOCAL = false // process.env.IS_LOCAL === "true"
     // Deconstruct object into its default values
@@ -286,7 +312,8 @@ export async function launchBrowser(
     const VNC_MODE = config.vnc?.mode || "rw"
     const VNC_IS_PASSWORD_PROTECTED = config.vnc?.isPasswordProtected || false
     const VNC_IS_ENABLED = config.vnc?.isEnabled || true
-
+    const VNC_VERSION = config.vnc?.version || "legacy"
+    
     // Window
     const WINDOW_BROWSER = config.window?.browser || "chrome"
     const WINDOW_SCREEN_RESOLUTION = config.window?.screen?.resolution || "1280x1024"
@@ -370,6 +397,7 @@ export async function launchBrowser(
         if(!IS_LOCAL){
             try {
                 pids = await runOnPreBrowserRunScript(
+                    VNC_VERSION === "legacy",
                     VNC_IS_ENABLED,
                     VNC_IS_PASSWORD_PROTECTED,
                     VNC_MODE === "ro",
@@ -421,35 +449,12 @@ export async function launchBrowser(
             }
         }
 
-        // NOTE - IT crashes if wrong filter is used
-        const userAgent = OVERRIDE_USER_AGENT ? OVERRIDE_USER_AGENT : new UserAgent([
-            {
-                deviceCategory: "desktop",
-                //platform: PLATFORM,
-            // appName: "Netscape",
-            // Linux || Win32 || MacIntel
-            ///platform: "Win32",
-            // Google Chrome=>"Google Inc." Safari=>"Apple Computer, Inc." Firefox, EDGE=>"",
-            // vendor: "Google Inc.",
-            //userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-            //screenWidth: Number(WINDOW_SCREEN_RESOLUTION.split("x")[0]),
-            //screenHeight: Number(WINDOW_SCREEN_RESOLUTION.split("x")[1]),
-            // connection: {
-            //     // wifi || ethernet || cellular
-            //     type: 'wifi',
-            // }
-        }]).random()
-        // Browser Launch Configuration 
-        // Extensions [ ]
-        // useData
-        // stealth
-        // iframe.contentWindow
-        // navigator.hardwareConcurrency
-        // navigator.languages
-        // navigator.permissions
-        // navigator.vendor
-        // navigator.webdriver
-        // user-agent-override
+        // Generate UserAgent using the library like before
+        const userAgent = OVERRIDE_USER_AGENT || new UserAgent({
+            deviceCategory: 'desktop',
+            platform: 'Win32'
+        }).toString();
+        
         const extensionArgs : string[] = []
         if(!IS_LOCAL){
             const baseExtensions : string[]= [
@@ -481,15 +486,7 @@ export async function launchBrowser(
 
         // Browser to use
         let appName = "google-chrome"
-        // if(WINDOW_BROWSER === "edge"){
-        //     appName = "microsoft-edge"
-        // } else if(WINDOW_BROWSER === "brave"){
-        //     appName = "brave-browser"
-        // } else if (WINDOW_BROWSER === "opera"){
-        //     appName = "opera"
-        // } else {
-        //     appName = "google-chrome"
-        // }
+        
         // https://github.com/GoogleChrome/chrome-launcher/blob/main/docs/chrome-flags-for-tools.md#--enable-automation
         const opts: PuppeteerLaunchOptions = {
             executablePath: IS_LOCAL ? undefined : `/usr/bin/${appName}`,
@@ -505,7 +502,7 @@ export async function launchBrowser(
             pipe: false,
             args: [
                 "--url about:blank",
-                `--user-agent=${userAgent.toString()}`,
+                `--user-agent=${userAgent}`,
 
                 // Notifications
                 "--disable-geolocation",
@@ -552,13 +549,13 @@ export async function launchBrowser(
                 "--disable-dev-shm-usage",
                 "--disable-client-side-phishing-detection",
                 "--disable-blink-features=AutomationControlled",
-                "--disable-features=PasswordManager,AutofillAssistant,DoNotTrack,IsolateOrigins,SameSiteByDefaultCookies,LazyFrameLoading",
+                "--disable-features=PasswordManager,AutofillAssistant,DoNotTrack,IsolateOrigins,SameSiteByDefaultCookies,LazyFrameLoading,VizDisplayCompositor",
+                "--disable-canvas-aa", // Disable canvas anti-aliasing for consistency
+                "--disable-2d-canvas-clip-aa", // Disable 2D canvas clip anti-aliasing
+                "--disable-gl-drawing-for-tests", // Disable GL drawing for tests
                 //"--disable-site-isolation-trials",
                 // "--disable-web-security",
                 "--disable-component-update",
-
-                // Enable
-                "--enable-features=NetworkService,NetworkServiceInProcess",
                 
                 // DevTools
                 "--remote-debugging-port=9222",
@@ -624,12 +621,51 @@ export async function launchBrowser(
             // await gracefulShutdown("exit", null, true)
         })
 
+        // Use the passed fingerprinting protection instance (which has IP-adjusted values)
+        // or create a new one if none was passed
+        let fingerprintingProtection = fingerprintingProtectionInstance;
+        
+        // If we have a fingerprinting protection instance, update it with the actual UserAgent
+        if (fingerprintingProtection) {
+            // Create a new instance with the actual UserAgent for consistency
+            fingerprintingProtection = new FingerprintingProtection(
+                fingerprintingProtection.getConfig(), // Access the config via getter
+                undefined, // No request criteria needed
+                userAgent // Pass the actual UserAgent
+            );
+        } else if (config.fingerprinting?.enabled !== false) {
+            // Create new fingerprinting protection with actual UserAgent
+            fingerprintingProtection = createFingerprintingProtection(
+                userAgent,
+                PLATFORM,
+                LANGUAGE,
+                TIMEZONE,
+                config.fingerprinting ? {
+                    hardwareConcurrency: config.fingerprinting.hardwareConcurrency,
+                    deviceMemory: config.fingerprinting.deviceMemory,
+                    maxTouchPoints: config.fingerprinting.maxTouchPoints
+                } : undefined
+            );
+        } else {
+            fingerprintingProtection = null;
+        }
+
         // Listen for new targets (pages)
         browser.on('targetcreated', async (target) => {
             if (target.type() === 'page') {
                 const page = await target.asPage();
                 if (page) {
-                    await page.emulateTimezone("America/New_York")
+                    // Apply comprehensive fingerprinting protection
+                    if (fingerprintingProtection) {
+                        try {
+                            await fingerprintingProtection.applyProtections(page);
+                        } catch (error) {
+                            LOGGER.error("Failed to apply fingerprinting protections to new page", { error });
+                        }
+                    }
+
+                    // Set timezone consistently
+                    await page.emulateTimezone(TIMEZONE);
 
                     const client = await page.createCDPSession()
                     await client.send('Page.setDownloadBehavior', {
@@ -666,14 +702,26 @@ export async function launchBrowser(
 
                 const pages = await connection.pages()
                 if(pages.length!==0){
-                    const newPage =await connection.newPage()
+                    const newPage = await connection.newPage()
                     await pages[0].close()
+
+                    // Apply fingerprinting protection to initial page
+                    if (fingerprintingProtection) {
+                        try {
+                            await fingerprintingProtection.applyProtections(newPage);
+                        } catch (error) {
+                            LOGGER.error("Failed to apply fingerprinting protections to initial page", { error });
+                        }
+                    }
 
                     // Set Viewport
                     await newPage.setViewport({
                         width: Number(WINDOW_SCREEN_RESOLUTION.split("x")[0]),
                         height: Number(WINDOW_SCREEN_RESOLUTION.split("x")[1])
                     })
+
+                    // Set timezone consistently
+                    await newPage.emulateTimezone(TIMEZONE);
                 }
 
                 connection.disconnect()
