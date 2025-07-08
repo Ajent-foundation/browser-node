@@ -458,7 +458,7 @@ export async function launchBrowser(
         const extensionArgs : string[] = []
         if(!IS_LOCAL){
             const baseExtensions : string[]= [
-                "uBlockOrigin",
+                //"uBlockOrigin",
                 "webrtc",
                 //"mhtml"
             ]
