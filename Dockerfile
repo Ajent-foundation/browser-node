@@ -38,7 +38,6 @@ RUN apt-get install -y \
     x11vnc \
     polybar \
     stunnel4 \ 
-    mitmproxy \
     xterm \
     pulseaudio \
     ffmpeg \
@@ -65,6 +64,9 @@ RUN apt-get install -y \
     libasound2 \
     libatk-bridge2.0-0 \
     libgtk-3-0 
+
+# Python for mitmproxy (allow system pip installs on Debian per PEP 668)
+RUN apt-get update && apt-get install -y python3 python3-pip && pip3 install --no-cache-dir --break-system-packages mitmproxy
 
 # Install Node.js and npm
 RUN apt-get update && apt-get install -y ca-certificates curl gnupg && \

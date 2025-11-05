@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { isBrowserActive } from "../handlers/system/isBrowserActive"
 import { closeDialog } from "../handlers/system/closeDialog"
 import { selectFileFromDialog } from "../handlers/system/selectFileFromDialog"
+import { devtoolsVersion } from "../handlers/system/devtoolsVersion"
 import { screenshot } from "../handlers/system/screenshot"
 import { mouse } from "../handlers/system/mouse"
 import { keyboard } from "../handlers/system/keyboard"
@@ -38,6 +39,11 @@ SYSTEM_ROUTES.post(
 SYSTEM_ROUTES.post(
 	'/keyboard',
 	keyboard
+)
+
+SYSTEM_ROUTES.get(
+    '/devtools/version', 
+    devtoolsVersion
 )
 
 module.exports = SYSTEM_ROUTES
