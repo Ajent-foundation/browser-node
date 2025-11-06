@@ -16,8 +16,9 @@ export async function devtoolsVersion(
 	next:NextFunction
 ){
     try {
-        // DevTools is forwarded inside the container from 19222 -> 9222
-        const resp = await axios.get("http://127.0.0.1:19222/json/version", { timeout: 1000 })
+        // DevTools is forwarded inside the container from NODE_BROWSER_PORT -> 9222
+        const browserPort = process.env.NODE_BROWSER_PORT || "19222"
+        const resp = await axios.get(`http://127.0.0.1:${browserPort}/json/version`, { timeout: 1000 })
         const data = resp.data || {}
         // Optionally rewrite hostname/port via query params (?host=x&port=y)
         const host = (req.query.host as string) || undefined

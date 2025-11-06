@@ -137,11 +137,13 @@ export async function makeSessionData(){
     )
 
     // STEP-4: Copying Cookies
-    fs.copyFileSync(`${userDir}${googleData}/Cookies`, `${temp}/Cookies`)
-
-    LOGGER.info(
-        `Copied Cookies`,
-    )
+    const cookiesPath = `${userDir}${googleData}/Cookies`
+    if (fs.existsSync(cookiesPath)) {
+        fs.copyFileSync(cookiesPath, `${temp}/Cookies`)
+        LOGGER.info(
+            `Copied Cookies`,
+        )
+    }
 
     // STEP-5: Compress the folder
     await create(

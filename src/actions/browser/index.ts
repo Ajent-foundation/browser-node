@@ -200,8 +200,9 @@ async function runOnPreBrowserRunScript(
 
 function runListener() : Promise<number> {
     return new Promise((resolve, reject) => {
+        const browserPort = process.env.NODE_BROWSER_PORT || "19222"
         LOGGER.info(
-            "[INFO] Setting up port forwarding from 19222 to localhost:9222...",
+            `[INFO] Setting up port forwarding from ${browserPort} to localhost:9222...`,
         )
         
         const httpTunnelPath = process.env.STUNNEL_HTTP === "true" ? true : false
@@ -211,7 +212,7 @@ function runListener() : Promise<number> {
                 "[INFO] running using socat",
             )
 
-            const socatProcess = spawn('socat', ['TCP4-LISTEN:19222,fork,reuseaddr', 'TCP4:localhost:9222'], {
+            const socatProcess = spawn('socat', [`TCP4-LISTEN:${browserPort},fork,reuseaddr`, 'TCP4:localhost:9222'], {
                 detached: true,
                 stdio: 'ignore'
             })
