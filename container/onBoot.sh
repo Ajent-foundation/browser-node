@@ -38,6 +38,16 @@ run_xvfb() {
 run_env_setup(){
     export CHROME_USER_DATA_DIR="/home/user/.config/chrome"
     export WAIT_FOR_PROCESS_TIMEOUT=10
+    
+    # Create necessary directories for browser data (tmpfs mounts are empty)
+    mkdir -p /home/user/temp/Default
+    mkdir -p /home/user/.config/chrome
+    mkdir -p /home/user/session
+    mkdir -p /home/user/downloads
+    mkdir -p /home/user/uploads
+    
+    # Set proper permissions
+    chown -R user:user /home/user/temp /home/user/.config/chrome /home/user/session /home/user/downloads /home/user/uploads 2>/dev/null || true
 }
 
 run_openbox() {
