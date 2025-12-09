@@ -27,7 +27,8 @@ RUN apt-get update && \
 # openbox - Window manager
 # feh - Image viewer
 # x11vnc - VNC server
-# polybar - Status bar
+# lxpanel - Panel with menu and system tray
+# rofi - Application launcher
 # stunnel4 - SSL tunnel
 # xterm - Standard terminal
 # pulseaudio - Sound server
@@ -36,7 +37,8 @@ RUN apt-get install -y \
     openbox \
     feh \
     x11vnc \
-    polybar \
+    rofi \
+    lxpanel \
     stunnel4 \ 
     xterm \
     pulseaudio \
@@ -46,7 +48,22 @@ RUN apt-get install -y \
     scrot \
     lsof \
     vim \
-    patch
+    patch \
+    xclip \
+    x11-utils \
+    procps \
+    git \
+    pcmanfm \
+    mousepad \
+    evince \
+    eog \
+    gnome-calculator \
+    gnome-system-monitor \
+    gnome-screenshot \
+    gnome-terminal \
+    gimp \
+    vlc \
+    libreoffice-writer
 
 # Google Chrome dependencies
 RUN apt-get install -y \
@@ -83,8 +100,8 @@ RUN useradd user && \
     mkdir /home/user/temp && \
     mkdir /home/user/temp/Default && \
     mkdir /home/user/.config && \
-    mkdir /home/user/.config/openbox && \
-    mkdir /home/user/.config/polybar && \
+    mkdir -p /home/user/.config/openbox && \
+    mkdir -p /home/user/.config/lxpanel/default && \
     mkdir /home/user/.themes && \
     mkdir -p /home/user/.local/share/fonts && \
     mkdir /home/user/app && \
@@ -96,7 +113,7 @@ RUN useradd user && \
     
 # Copy configs
 COPY --from=builder /home/app/container/openbox/ /home/user/.config/openbox/
-COPY --from=builder /home/app/container/polybar/ /home/user/.config/polybar/
+COPY --from=builder /home/app/container/lxpanel/ /home/user/.config/lxpanel/
 COPY --from=builder /home/app/container/chrome/Preferences /home/user/temp/Default/Preferences
 
 ARG sourc="/home/app/container/chrome/Local State"
@@ -129,6 +146,7 @@ RUN find . -name "*.crx" -exec sh -c 'mv "$1" "${1%.crx}.zip"' _ {} \; && \
 
 # Copy App
 COPY --from=builder /home/app/websockify /home/user/app/websockify/
+COPY --from=builder /home/app/cdp-interceptor /home/user/app/cdp-interceptor/
 COPY --from=builder /home/app/build /home/user/app/src/
 COPY --from=builder /home/app/configs /home/user/app/configs/
 COPY --from=builder /home/app/package.json /home/app/package-lock.json /home/user/app/
@@ -183,10 +201,16 @@ EXPOSE 15900 19222 8080
 WORKDIR /home/user/app
 RUN npm install --omit=dev
 
-# Download and install websockify
+# Build websockify
 WORKDIR /home/user/app/websockify
 RUN npm install
 RUN npm run build
+
+# Build cdp-interceptor
+WORKDIR /home/user/app/cdp-interceptor
+RUN npm install
+RUN npm run build
+
 WORKDIR /home/user/app
 
 #USER user

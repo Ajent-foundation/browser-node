@@ -1,0 +1,77 @@
+# LXPanel configuration file
+# Modern, sleek design
+
+# Global settings - Modern dark theme with transparency
+Global {
+    edge=bottom
+    allign=left
+    margin=0
+    widthtype=percent
+    width=100
+    height=44
+    transparent=1
+    tintcolor=#0f1419
+    alpha=245
+    autohide=0
+    heightwhenhidden=2
+    setdocktype=1
+    setpartialstrut=0
+    usefontcolor=1
+    fontcolor=#ffffff
+    background=1
+    backgroundfile=
+    iconsize=32
+    loglevel=0
+}
+
+# Plugin: Menu (Start Button) - Modern menu with all applications
+Plugin {
+    type=menu
+    Config {
+        image=/usr/share/lxpanel/images/start-here.png
+        system {
+        }
+        separator {
+        }
+        item {
+            name=Run
+            image=system-run
+            action=rofi -show run
+        }
+        separator {
+        }
+        item {
+            name=Shutdown
+            image=system-shutdown
+            action=oblogout
+        }
+    }
+}
+
+# Plugin: Launchbar (Quick Launch Icons) - Modern spacing
+Plugin {
+    type=launchbar
+    Config {
+        Button {
+            id=pcmanfm.desktop
+        }
+        Button {
+            id=gnome-terminal.desktop
+        }
+    }
+}
+
+# Plugin: Clock - Modern styling
+Plugin {
+    type=clock
+    Config {
+        ClockFmt=%H:%M
+        TooltipFmt=%A %d %B %Y
+        BoldFont=1
+        IconOnly=0
+        CenterText=1
+        FontColor=#ffffff
+        FontSize=11
+    }
+}
+

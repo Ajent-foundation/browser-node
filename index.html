@@ -1,51 +1,2679 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>VNC Viewer</title>
-        <link rel="stylesheet" href="styles.css">
-    </head>
-    <body>
-        <div id="main__content">
-            <div class="vnc__screen">
-                <div id="screen">
-                    <!-- This is where the remote screen will appear -->
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Browser Node - Testing Interface</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #1a1a2e;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #0f3460 0%, #16213e 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            opacity: 0.9;
+        }
+        
+        .tabs {
+            display: flex;
+            background: #f5f5f5;
+            border-bottom: 2px solid #e0e0e0;
+        }
+        
+        .tab {
+            flex: 1;
+            padding: 20px;
+            text-align: center;
+            cursor: pointer;
+            background: #f5f5f5;
+            border: none;
+            font-size: 16px;
+            font-weight: 600;
+            color: #666;
+            transition: all 0.3s;
+        }
+        
+        .tab:hover {
+            background: #e8e8e8;
+        }
+        
+        .tab.active {
+            background: white;
+            color: #0f3460;
+            border-bottom: 3px solid #0f3460;
+        }
+        
+        .tab-content {
+            display: none;
+            padding: 30px;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .section {
+            margin-bottom: 40px;
+            padding: 25px;
+            background: #f9f9f9;
+            border-radius: 8px;
+            border-left: 4px solid #0f3460;
+        }
+        
+        .section h3 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 1.3em;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #555;
+            font-weight: 500;
+        }
+        
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #0f3460;
+        }
+        
+        .form-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .checkbox-group input[type="checkbox"] {
+            width: auto;
+        }
+        
+        .btn {
+            background: linear-gradient(135deg, #0f3460 0%, #16213e 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin-right: 10px;
+            margin-top: 10px;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(15, 52, 96, 0.4);
+        }
+        
+        .btn:active {
+            transform: translateY(0);
+        }
+        
+        .btn-secondary {
+            background: #6c757d;
+        }
+        
+        .btn-success {
+            background: #28a745;
+        }
+        
+        .btn-danger {
+            background: #dc3545;
+        }
+        
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            border-left: 4px solid #0f3460;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .result pre {
+            margin: 0;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+        
+        .result.success {
+            border-left-color: #28a745;
+            background: #d4edda;
+        }
+        
+        .result.error {
+            border-left-color: #dc3545;
+            background: #f8d7da;
+        }
+        
+        .vnc-container {
+            margin-top: 20px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        
+        #screen {
+            width: 100%;
+            min-height: 400px;
+            background: #000;
+        }
+        
+        /* Sticky VNC Viewer */
+        .vnc-sticky {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 400px;
+            height: 300px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            resize: both;
+            overflow: hidden;
+            min-width: 300px;
+            min-height: 200px;
+            max-width: 800px;
+            max-height: 600px;
+            border: 2px solid #0f3460;
+        }
+        
+        .vnc-sticky-header {
+            background: #0f3460;
+            color: white;
+            padding: 10px 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: move;
+        }
+        
+        .vnc-sticky-header h4 {
+            margin: 0;
+            font-size: 14px;
+        }
+        
+        .vnc-sticky-controls {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .vnc-sticky-controls button {
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-left: 5px;
+        }
+        
+        .vnc-sticky-controls button:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        
+        .vnc-sticky-controls button:active {
+            background: rgba(255,255,255,0.4);
+        }
+        
+        .vnc-sticky-content {
+            flex: 1;
+            overflow: hidden;
+            background: #000;
+        }
+        
+        .vnc-sticky-content #screen-sticky {
+            width: 100%;
+            height: 100%;
+        }
+        
+        .vnc-sticky.minimized {
+            height: 40px;
+        }
+        
+        .vnc-sticky.minimized .vnc-sticky-content {
+            display: none;
+        }
+        
+        .vnc-sticky.maximized {
+            width: calc(100vw - 40px) !important;
+            height: calc(100vh - 40px) !important;
+            max-width: none !important;
+            max-height: none !important;
+            top: 20px !important;
+            left: 20px !important;
+            right: auto !important;
+            bottom: auto !important;
+        }
+        
+        .vnc-sticky.fullscreen {
+            position: fixed;
+            top: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            bottom: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            max-width: none !important;
+            max-height: none !important;
+            border-radius: 0;
+            z-index: 9999;
+        }
+        
+        .vnc-sticky.fullscreen .vnc-sticky-content {
+            height: calc(100vh - 40px);
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        
+        .status-indicator.connected {
+            background: #28a745;
+        }
+        
+        .status-indicator.disconnected {
+            background: #dc3545;
+        }
+        
+        .file-upload-area {
+            border: 2px dashed #0f3460;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            background: #f0f4f8;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .file-upload-area:hover {
+            background: #e8f0f8;
+            border-color: #16213e;
+        }
+        
+        .file-upload-area.dragover {
+            background: #d8e8f8;
+            border-color: #16213e;
+        }
+        
+        .screenshot-preview {
+            max-width: 100%;
+            border-radius: 8px;
+            margin-top: 15px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        
+        /* Recording pulse animation */
+        @keyframes pulse {
+            0% {
+                box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.7);
+            }
+            70% {
+                box-shadow: 0 0 0 10px rgba(220, 53, 69, 0);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(220, 53, 69, 0);
+            }
+        }
+        
+        /* Recording tab specific styles */
+        .stat-card {
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        
+        details summary {
+            padding: 5px;
+            user-select: none;
+        }
+        
+        details summary:hover {
+            background: #e0e0e0;
+            border-radius: 4px;
+        }
+        
+        details[open] summary {
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🖥️ Browser Node Testing Interface</h1>
+            <p>Test all system, file, and session endpoints</p>
+        </div>
+        
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('actions')">Actions</button>
+            <button class="tab" onclick="switchTab('system')">System Commands</button>
+            <button class="tab" onclick="switchTab('files')">File Operations</button>
+            <button class="tab" onclick="switchTab('session')">Session Management</button>
+            <button class="tab" onclick="switchTab('recording')">🔴 Recording</button>
+        </div>
+        
+        <!-- Actions Tab -->
+        <div id="actions-tab" class="tab-content active">
+            <div class="section">
+                <h3>🚀 Launch Browser</h3>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Driver:</label>
+                        <select id="launch-driver">
+                            <option value="puppeteer">Puppeteer</option>
+                            <option value="playwright">Playwright</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Resolution:</label>
+                        <select id="launch-resolution">
+                            <option value="1280x1024">1280x1024</option>
+                            <option value="1920x1080">1920x1080</option>
+                            <option value="1366x768">1366x768</option>
+                            <option value="1536x864">1536x864</option>
+                            <option value="1280x720">1280x720</option>
+                            <option value="1440x900">1440x900</option>
+                            <option value="1280x2400">1280x2400</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Lease Time (minutes):</label>
+                        <input type="number" id="launch-lease-time" value="30" min="1" max="60" />
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Platform:</label>
+                        <select id="launch-platform">
+                            <option value="win32">Windows</option>
+                            <option value="linux">Linux</option>
+                            <option value="darwin">macOS</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Language:</label>
+                        <input type="text" id="launch-language" value="en-US" />
+                    </div>
+                    <div class="form-group">
+                        <label>Timezone:</label>
+                        <input type="text" id="launch-timezone" value="America/New_York" />
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>VNC Mode:</label>
+                        <select id="launch-vnc-mode">
+                            <option value="rw">Read-Write</option>
+                            <option value="ro">Read-Only</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>VNC Version:</label>
+                        <select id="launch-vnc-version">
+                            <option value="legacy">Legacy (websockify.js)</option>
+                            <option value="new">New (main.ts - supports recording)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="launch-vnc-password" />
+                        <label for="launch-vnc-password">VNC Password Protected</label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <div class="checkbox-group" style="background: #fff3e0; padding: 10px; border-radius: 6px; border: 2px solid #ff9800;">
+                        <input type="checkbox" id="launch-record-data" onchange="onRecordDataChange()" />
+                        <label for="launch-record-data" style="color: #e65100; font-weight: 600;">🔴 Enable Session Recording (CDP, Network, System Actions, VNC)</label>
+                    </div>
+                    <small id="vnc-version-warning" style="display: none; color: #dc3545; font-size: 12px; margin-top: 5px;">
+                        ⚠️ Recording requires VNC Version "New" - please select it above
+                    </small>
+                </div>
+                <button class="btn" onclick="testLaunch()">Launch Browser</button>
+                <div id="launch-result" class="result" style="display:none;"></div>
+            </div>
+            
+            <div class="section">
+                <h3>🔌 Browser Management</h3>
+                <button class="btn" onclick="testLease()">Extend Lease</button>
+                <button class="btn btn-danger" onclick="testFree()">Free Browser</button>
+                <div id="management-result" class="result" style="display:none;"></div>
+            </div>
+            
+            <div class="section">
+                <h3>⚙️ API Configuration</h3>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>API Base URL:</label>
+                        <input type="text" id="api-base-url" value="http://127.0.0.1:7070" placeholder="http://127.0.0.1:7070" />
+                        <small style="color: #666; font-size: 12px;">Default: http://127.0.0.1:7070 (from dev:poc port mapping)</small>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h3>📺 VNC Connection</h3>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>VNC Host:</label>
+                        <input type="text" id="vnc-host" value="127.0.0.1" />
+                    </div>
+                    <div class="form-group">
+                        <label>VNC Port:</label>
+                        <input type="number" id="vnc-port" value="15900" />
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>API Key (required for New VNC):</label>
+                        <input type="text" id="vnc-connect-apikey" placeholder="Enter API key" />
+                    </div>
+                    <div class="form-group">
+                        <label>Client ID:</label>
+                        <input type="text" id="vnc-connect-clientid" placeholder="Auto-generated if empty" />
+                    </div>
+                </div>
+                <div style="margin-bottom: 15px; padding: 10px; background: #e3f2fd; border-radius: 6px; border-left: 3px solid #2196f3;">
+                    <strong>🔑 API Key Setup (New VNC Only):</strong>
+                    <div style="margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap;">
+                        <button class="btn btn-success" onclick="registerVNCApiKeyForConnect()" style="margin: 0;">➕ Register Key</button>
+                        <button class="btn btn-danger" onclick="unregisterVNCApiKeyForConnect()" style="margin: 0;">➖ Unregister Key</button>
+                        <button class="btn btn-secondary" onclick="fetchRegisteredClients()" style="margin: 0;">👥 List Clients</button>
+                        <button class="btn btn-secondary" onclick="fetchVNCStatusForConnect()" style="margin: 0;">📡 VNC Status</button>
+                    </div>
+                    <div id="vnc-apikey-status" class="result" style="display:none; margin-top: 10px; max-height: 200px;"></div>
+                </div>
+                <button class="btn" onclick="connectVNC()">Connect VNC</button>
+                <button class="btn btn-danger" onclick="disconnectVNC()">Disconnect</button>
+                <div id="vnc-status" style="margin-top: 15px;">
+                    <span class="status-indicator disconnected"></span>
+                    <span>Disconnected</span>
                 </div>
             </div>
         </div>
-        <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-        <script src="https://cdn.jsdelivr.net/npm/@hostnet/novnc@1.0.0/dist/novnc.min.js"></script>
-        <script type="module">
-            // Quick Example (Good for debugging)
-            // Configure your VNC connection details here
-            const VNC_HOST = '127.0.0.1'
-            const VNC_PORT = 15900  // Change this to your VNC port
-            let rfb
-            let desktopName
-
-            function connectVNC() {
-                console.log("Connecting to VNC server at " + VNC_HOST + ":" + VNC_PORT)
-                // Creating a new RFB object will start a new connection
-                rfb = new RFB(
-                    document.getElementById('screen'), 
-                    `ws://${VNC_HOST}:${VNC_PORT}?apiKey=DnnPEOCSKCf2&clientId=879612d1-e0f9-45b0-91a8-255fccf4c953`,
-                    //{ credentials: { password: "" }}
-                )
-
-                // Set parameters that can be changed on an active connection
-                rfb.viewOnly = false
-                rfb.scaleViewport = false   
+        
+        <!-- System Commands Tab -->
+        <div id="system-tab" class="tab-content">
+            <!-- Mouse Section -->
+            <div class="section">
+                <h3>🖱️ Mouse Control</h3>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>X Coordinate:</label>
+                        <input type="number" id="mouse-x" value="100" />
+                    </div>
+                    <div class="form-group">
+                        <label>Y Coordinate:</label>
+                        <input type="number" id="mouse-y" value="100" />
+                    </div>
+                    <div class="form-group">
+                        <label>Button:</label>
+                        <select id="mouse-button">
+                            <option value="left">Left</option>
+                            <option value="right">Right</option>
+                            <option value="middle">Middle</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="mouse-move" />
+                        <label for="mouse-move">Move Mouse</label>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="mouse-double-click" />
+                        <label for="mouse-double-click">Double Click</label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Action (optional):</label>
+                    <select id="mouse-action">
+                        <option value="">None (click)</option>
+                        <option value="mousedown">Mouse Down</option>
+                        <option value="mouseup">Mouse Up</option>
+                    </select>
+                </div>
+                <button class="btn" onclick="testMouse()">Execute Mouse Action</button>
+                <button class="btn btn-secondary" onclick="testMouseMoveOnly()">Move Only (No Click)</button>
+                <button class="btn btn-secondary" onclick="testMouseLocation()">Get Mouse Location</button>
+                <button class="btn btn-secondary" onclick="testMouseState()">Get Mouse State</button>
+                <div id="mouse-result" class="result" style="display:none;"></div>
+            </div>
+            
+            <!-- Keyboard Section -->
+            <div class="section">
+                <h3>⌨️ Keyboard Control</h3>
+                <div class="form-group">
+                    <label>Text to Type:</label>
+                    <input type="text" id="keyboard-text" placeholder="Enter text to type" />
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Key:</label>
+                        <input type="text" id="keyboard-key" placeholder="e.g., Enter, Tab, Escape" />
+                    </div>
+                    <div class="form-group">
+                        <label>Type:</label>
+                        <select id="keyboard-type">
+                            <option value="type">Type</option>
+                            <option value="keydown">Key Down</option>
+                            <option value="keyup">Key Up</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Min Delay (ms):</label>
+                        <input type="number" id="keyboard-delay-min" value="0" min="0" />
+                    </div>
+                    <div class="form-group">
+                        <label>Max Delay (ms):</label>
+                        <input type="number" id="keyboard-delay-max" value="0" min="0" />
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Modifiers (hold Ctrl/Cmd to select multiple):</label>
+                    <select id="keyboard-modifiers" multiple style="height: 80px;">
+                        <option value="ctrl">Ctrl</option>
+                        <option value="alt">Alt</option>
+                        <option value="shift">Shift</option>
+                        <option value="super">Super (Windows/Command)</option>
+                    </select>
+                </div>
+                <button class="btn" onclick="testKeyboard()">Execute Keyboard Action</button>
+                <button class="btn btn-secondary" onclick="testKeyboardState()">Get Keyboard State</button>
+                <div id="keyboard-result" class="result" style="display:none;"></div>
+            </div>
+            
+            <!-- Clipboard Section -->
+            <div class="section">
+                <h3>📋 Clipboard</h3>
+                <div class="form-group">
+                    <label>Clipboard Content:</label>
+                    <textarea id="clipboard-content" rows="4" placeholder="Enter text to set clipboard"></textarea>
+                </div>
+                <button class="btn" onclick="testClipboardSet()">Set Clipboard</button>
+                <button class="btn btn-secondary" onclick="testClipboardGet()">Get Clipboard</button>
+                <div id="clipboard-result" class="result" style="display:none;"></div>
+            </div>
+            
+            <!-- Screenshot Section -->
+            <div class="section">
+                <h3>📸 Screenshot</h3>
+                <div class="form-group">
+                    <label>Quality (1-100):</label>
+                    <input type="number" id="screenshot-quality" value="50" min="1" max="100" />
+                </div>
+                <button class="btn" onclick="testScreenshot()">Take Screenshot</button>
+                <div id="screenshot-result" class="result" style="display:none;"></div>
+            </div>
+            
+            <!-- Drag Section -->
+            <div class="section">
+                <h3>🖱️ Drag Operation</h3>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Start X:</label>
+                        <input type="number" id="drag-start-x" value="100" />
+                    </div>
+                    <div class="form-group">
+                        <label>Start Y:</label>
+                        <input type="number" id="drag-start-y" value="100" />
+                    </div>
+                    <div class="form-group">
+                        <label>End X:</label>
+                        <input type="number" id="drag-end-x" value="300" />
+                    </div>
+                    <div class="form-group">
+                        <label>End Y:</label>
+                        <input type="number" id="drag-end-y" value="300" />
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Button:</label>
+                        <select id="drag-button">
+                            <option value="left">Left</option>
+                            <option value="right">Right</option>
+                            <option value="middle">Middle</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Duration (ms):</label>
+                        <input type="number" id="drag-duration" value="500" min="0" />
+                    </div>
+                </div>
+                <button class="btn" onclick="testDrag()">Execute Drag</button>
+                <div id="drag-result" class="result" style="display:none;"></div>
+            </div>
+            
+            <!-- Scroll Section -->
+            <div class="section">
+                <h3>📜 Scroll</h3>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Scroll Amount (pixels):</label>
+                        <input type="number" id="scroll-amount" value="120" />
+                    </div>
+                    <div class="form-group">
+                        <label>Direction:</label>
+                        <select id="scroll-direction">
+                            <option value="down">Down</option>
+                            <option value="up">Up</option>
+                        </select>
+                    </div>
+                </div>
+                <button class="btn" onclick="testScroll()">Scroll</button>
+                <div id="scroll-result" class="result" style="display:none;"></div>
+            </div>
+            
+            <!-- Screen Size Section -->
+            <div class="section">
+                <h3>🖥️ Screen Information</h3>
+                <button class="btn" onclick="testScreenSize()">Get Screen Size</button>
+                <button class="btn btn-secondary" onclick="testIsBrowserActive()">Check Browser Active</button>
+                <div id="screen-result" class="result" style="display:none;"></div>
+            </div>
+            
+            <!-- Windows Section -->
+            <div class="section">
+                <h3>🪟 Window Management</h3>
+                <button class="btn" onclick="testWindows()">Get All Windows</button>
+                <div class="form-row" style="margin-top: 15px;">
+                    <div class="form-group">
+                        <label>Window ID:</label>
+                        <input type="number" id="window-id" placeholder="Window ID" />
+                    </div>
+                    <div class="form-group">
+                        <label>Window Name:</label>
+                        <input type="text" id="window-name" placeholder="Window name" />
+                    </div>
+                    <div class="form-group">
+                        <label>Action:</label>
+                        <select id="window-action">
+                            <option value="focus">Focus</option>
+                            <option value="minimize">Minimize</option>
+                            <option value="maximize">Maximize</option>
+                            <option value="restore">Restore</option>
+                            <option value="close">Close</option>
+                        </select>
+                    </div>
+                </div>
+                <button class="btn" onclick="testWindowControl()">Control Window</button>
+                <div id="windows-result" class="result" style="display:none;"></div>
+            </div>
+            
+            <!-- Shell Command Section -->
+            <div class="section">
+                <h3>💻 Shell Command</h3>
+                <div class="form-group">
+                    <label>Command:</label>
+                    <input type="text" id="shell-command" placeholder="e.g., ls -la, pwd, echo 'hello'" />
+                </div>
+                <div class="form-group">
+                    <label>Timeout (ms):</label>
+                    <input type="number" id="shell-timeout" value="30000" min="1000" />
+                </div>
+                <button class="btn" onclick="testShellCommand()">Execute Command</button>
+                <div id="shell-result" class="result" style="display:none;"></div>
+            </div>
+        </div>
+        
+        <!-- Files Tab -->
+        <div id="files-tab" class="tab-content">
+            <div class="section">
+                <h3>📁 File Operations</h3>
+                <button class="btn" onclick="testFilesList()">List Files</button>
+                <div id="files-list-result" class="result" style="display:none;"></div>
+            </div>
+            
+            <div class="section">
+                <h3>📤 Upload File</h3>
+                <div class="file-upload-area" id="file-upload-area" onclick="document.getElementById('file-input').click()">
+                    <p>📎 Click to select file or drag and drop</p>
+                    <input type="file" id="file-input" style="display:none;" onchange="handleFileSelect(event)" />
+                </div>
+                <div id="file-upload-result" class="result" style="display:none;"></div>
+            </div>
+            
+            <div class="section">
+                <h3>📥 Download File</h3>
+                <div class="form-group">
+                    <label>File Name:</label>
+                    <input type="text" id="download-filename" placeholder="Enter file name to download" />
+                </div>
+                <button class="btn" onclick="testFileDownload()">Download File</button>
+                <div id="file-download-result" class="result" style="display:none;"></div>
+            </div>
+        </div>
+        
+        <!-- Session Tab -->
+        <div id="session-tab" class="tab-content">
+            <div class="section">
+                <h3>💾 Session Data</h3>
+                <button class="btn" onclick="testSessionData()">Get Session Data</button>
+                <div id="session-data-result" class="result" style="display:none;"></div>
+            </div>
+            
+            <div class="section">
+                <h3>📤 Upload Session</h3>
+                <div class="file-upload-area" id="session-upload-area" onclick="document.getElementById('session-input').click()">
+                    <p>📎 Click to select session file (tar.gz)</p>
+                    <input type="file" id="session-input" style="display:none;" accept=".tar.gz,.gz" onchange="handleSessionSelect(event)" />
+                </div>
+                <div id="session-upload-result" class="result" style="display:none;"></div>
+            </div>
+            
+            <div class="section">
+                <h3>📥 Download Session</h3>
+                <button class="btn" onclick="testSessionDownload()">Download Session</button>
+                <div id="session-download-result" class="result" style="display:none;"></div>
+            </div>
+            
+            <div class="section">
+                <h3>⚙️ Set Session Data</h3>
+                <div class="form-group">
+                    <label>Session Data (JSON):</label>
+                    <textarea id="session-set-data" rows="10" placeholder='{"cookies": [...], "localStorage": {...}}'></textarea>
+                </div>
+                <button class="btn" onclick="testSessionSet()">Set Session Data</button>
+                <div id="session-set-result" class="result" style="display:none;"></div>
+            </div>
+        </div>
+        
+        <!-- Recording Tab -->
+        <div id="recording-tab" class="tab-content">
+            <div class="section" style="border-left-color: #dc3545;">
+                <h3>🔴 Recording Status</h3>
+                <div id="recording-status" style="margin-bottom: 20px;">
+                    <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px;">
+                        <div id="recording-indicator" style="width: 20px; height: 20px; border-radius: 50%; background: #6c757d;"></div>
+                        <span id="recording-status-text" style="font-weight: 600; font-size: 1.1em;">Not Recording</span>
+                    </div>
+                    <div id="recording-session-info" style="display: none; padding: 15px; background: #e8f5e9; border-radius: 8px; margin-bottom: 15px;">
+                        <p><strong>Session ID:</strong> <code id="recording-session-id">-</code></p>
+                        <p><strong>Started:</strong> <span id="recording-started-at">-</span></p>
+                        <p><strong>Duration:</strong> <span id="recording-duration">-</span></p>
+                    </div>
+                </div>
+                <button class="btn" onclick="checkRecordingStatus()">🔄 Refresh Status</button>
+            </div>
+            
+            <div class="section" style="border-left-color: #28a745;">
+                <h3>📊 Session Summary</h3>
+                <div id="session-summary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                    <div class="stat-card" style="background: #e3f2fd; padding: 20px; border-radius: 8px; text-align: center;">
+                        <div style="font-size: 2em; font-weight: bold; color: #1976d2;" id="stat-system-actions">0</div>
+                        <div style="color: #666; font-size: 0.9em;">System Actions</div>
+                    </div>
+                    <div class="stat-card" style="background: #fff3e0; padding: 20px; border-radius: 8px; text-align: center;">
+                        <div style="font-size: 2em; font-weight: bold; color: #f57c00;" id="stat-network-requests">0</div>
+                        <div style="color: #666; font-size: 0.9em;">Network Requests</div>
+                    </div>
+                    <div class="stat-card" style="background: #f3e5f5; padding: 20px; border-radius: 8px; text-align: center;">
+                        <div style="font-size: 2em; font-weight: bold; color: #7b1fa2;" id="stat-cdp-events">0</div>
+                        <div style="color: #666; font-size: 0.9em;">CDP Events</div>
+                    </div>
+                    <div class="stat-card" style="background: #e8f5e9; padding: 20px; border-radius: 8px; text-align: center;">
+                        <div style="font-size: 2em; font-weight: bold; color: #388e3c;" id="stat-vnc-frames">0</div>
+                        <div style="color: #666; font-size: 0.9em;">VNC Frames</div>
+                    </div>
+                </div>
+                <button class="btn" onclick="fetchSessionSummary()">📊 Fetch Summary</button>
+                <button class="btn btn-secondary" onclick="exportRecordingData()">💾 Export All Data</button>
+                <div id="session-summary-result" class="result" style="display:none;"></div>
+            </div>
+            
+            <div class="section" style="border-left-color: #ff9800;">
+                <h3>⌨️ System Actions Log</h3>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Filter by Type:</label>
+                        <select id="action-type-filter">
+                            <option value="">All Actions</option>
+                            <option value="keyboard">Keyboard</option>
+                            <option value="mouse">Mouse</option>
+                            <option value="scroll">Scroll</option>
+                            <option value="drag">Drag</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Limit:</label>
+                        <input type="number" id="action-limit" value="50" min="1" max="500" />
+                    </div>
+                </div>
+                <button class="btn" onclick="fetchSystemActions()">🔍 Fetch Actions</button>
+                <button class="btn btn-secondary" onclick="clearActionsLog()">🗑️ Clear Display</button>
+                <div id="system-actions-log" class="result" style="display:none; max-height: 500px;"></div>
+            </div>
+            
+            <div class="section" style="border-left-color: #2196f3;">
+                <h3>🌐 Network Requests Log</h3>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Filter by URL:</label>
+                        <input type="text" id="network-url-filter" placeholder="e.g., api, .js, google" />
+                    </div>
+                    <div class="form-group">
+                        <label>Filter by Method:</label>
+                        <select id="network-method-filter">
+                            <option value="">All Methods</option>
+                            <option value="GET">GET</option>
+                            <option value="POST">POST</option>
+                            <option value="PUT">PUT</option>
+                            <option value="DELETE">DELETE</option>
+                            <option value="PATCH">PATCH</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Limit:</label>
+                        <input type="number" id="network-limit" value="50" min="1" max="500" />
+                    </div>
+                </div>
+                <button class="btn" onclick="fetchNetworkRequests()">🔍 Fetch Requests</button>
+                <button class="btn btn-secondary" onclick="clearNetworkLog()">🗑️ Clear Display</button>
+                <div id="network-requests-log" class="result" style="display:none; max-height: 500px;"></div>
+            </div>
+            
+            <div class="section" style="border-left-color: #9c27b0;">
+                <h3>🔧 CDP Events Log</h3>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Filter by Method:</label>
+                        <input type="text" id="cdp-method-filter" placeholder="e.g., Page, Network, DOM" />
+                    </div>
+                    <div class="form-group">
+                        <label>Direction:</label>
+                        <select id="cdp-direction-filter">
+                            <option value="">All</option>
+                            <option value="sent">Sent (Commands)</option>
+                            <option value="received">Received (Events/Responses)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Limit:</label>
+                        <input type="number" id="cdp-limit" value="50" min="1" max="500" />
+                    </div>
+                </div>
+                <button class="btn" onclick="fetchCDPEvents()">🔍 Fetch CDP Events</button>
+                <button class="btn btn-secondary" onclick="clearCDPLog()">🗑️ Clear Display</button>
+                <div id="cdp-events-log" class="result" style="display:none; max-height: 500px;"></div>
+            </div>
+            
+            <div class="section" style="border-left-color: #4caf50;">
+                <h3>🎬 VNC Recording (FBS Format - TightVNC Compatible)</h3>
+                <p style="font-size: 12px; color: #666; margin-bottom: 10px;">
+                    Records VNC session to FBS format. Playback with TightVNC rfbplayer or similar.
+                </p>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>VNC Port:</label>
+                        <input type="number" id="vnc-recording-port" value="15900" />
+                    </div>
+                    <div class="form-group">
+                        <label>Session ID:</label>
+                        <input type="text" id="vnc-recording-session-id" placeholder="recording-1" value="recording-1" />
+                    </div>
+                </div>
+                <button class="btn btn-success" onclick="startVNCRecording()">▶️ Start Recording</button>
+                <button class="btn btn-danger" onclick="stopVNCRecording()">⏹️ Stop Recording</button>
+                <button class="btn btn-secondary" onclick="fetchVNCRecordingStatus()">📊 Recording Status</button>
+                <button class="btn btn-warning" onclick="createVNCSnapshot()">📸 Create Snapshot</button>
+                
+                <!-- Live Recording Status -->
+                <div id="vnc-recording-live-status" style="margin-top: 15px; padding: 10px; background: #e8f5e9; border-radius: 6px; display: none;">
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                        <span id="recording-indicator" style="width: 12px; height: 12px; background: #f44336; border-radius: 50%; animation: pulse 1s infinite;"></span>
+                        <strong>Recording Active</strong>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; font-size: 13px;">
+                        <span><strong>Session:</strong> <span id="live-session-id">-</span></span>
+                        <span><strong>Connected:</strong> <span id="live-connected">-</span></span>
+                        <span><strong>Frames:</strong> <span id="live-frame-count">0</span></span>
+                        <span><strong>Size:</strong> <span id="live-bytes-written">0 KB</span></span>
+                        <span><strong>Resolution:</strong> <span id="live-resolution">-</span></span>
+                        <span><strong>Duration:</strong> <span id="live-duration">0s</span></span>
+                    </div>
+                </div>
+                
+                <div id="vnc-recording-result" class="result" style="display:none;"></div>
+            </div>
+            
+            <div class="section" style="border-left-color: #00bcd4;">
+                <h3>🔌 VNC Server Status (New Websockify Only)</h3>
+                <button class="btn" onclick="fetchVNCServerStatus()">📡 Server Status</button>
+                <button class="btn btn-secondary" onclick="fetchVNCClients()">👥 List Clients</button>
+                <button class="btn btn-secondary" onclick="fetchVNCClientPermissions()">🔐 Client Permissions</button>
+                <div id="vnc-server-result" class="result" style="display:none;"></div>
+            </div>
+            
+            
+            <div class="section" style="border-left-color: #e91e63;">
+                <h3>📁 VNC Recordings (FBS Files)</h3>
+                <p style="font-size: 12px; color: #666; margin-bottom: 10px;">
+                    FBS files can be played with <a href="https://www.tightvnc.com/download.php" target="_blank">TightVNC rfbplayer</a> 
+                    or converted to video with ffmpeg.
+                </p>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>VNC Port:</label>
+                        <input type="number" id="vnc-playback-port" value="15900" />
+                    </div>
+                </div>
+                <button class="btn" onclick="listVNCRecordings()">📂 List Recordings</button>
+                <button class="btn btn-secondary" onclick="refreshRecordingsList()">🔄 Refresh</button>
+                
+                <div id="vnc-recordings-list" style="margin-top: 15px; display: none;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                        <thead>
+                            <tr style="background: #f5f5f5;">
+                                <th style="padding: 8px; text-align: left; border-bottom: 2px solid #ddd;">Session ID</th>
+                                <th style="padding: 8px; text-align: left; border-bottom: 2px solid #ddd;">Size</th>
+                                <th style="padding: 8px; text-align: left; border-bottom: 2px solid #ddd;">Created</th>
+                                <th style="padding: 8px; text-align: left; border-bottom: 2px solid #ddd;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="vnc-recordings-tbody">
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div id="vnc-playback-result" class="result" style="display:none;"></div>
+            </div>
+            
+            <div class="section" style="border-left-color: #607d8b;">
+                <h3>🔬 Raw Data Inspector</h3>
+                <div class="form-group">
+                    <label>Data Type:</label>
+                    <select id="raw-data-type">
+                        <option value="systemActions">System Actions</option>
+                        <option value="networkRequests">Network Requests</option>
+                        <option value="cdpEvents">CDP Events</option>
+                        <option value="sessions">Sessions</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Session ID (optional):</label>
+                    <input type="text" id="raw-session-id" placeholder="Leave empty for current session" />
+                </div>
+                <button class="btn" onclick="fetchRawData()">🔍 Fetch Raw Data</button>
+                <button class="btn btn-secondary" onclick="downloadRawData()">💾 Download JSON</button>
+                <div id="raw-data-result" class="result" style="display:none; max-height: 600px;"></div>
+            </div>
+            
+            <div class="section" style="border-left-color: #795548;">
+                <h3>🧹 Data Management</h3>
+                <div class="form-group">
+                    <label>Session ID to Clear:</label>
+                    <input type="text" id="clear-session-id" placeholder="Session ID" />
+                </div>
+                <button class="btn btn-danger" onclick="clearSessionRecordingData()">🗑️ Clear Session Data</button>
+                <button class="btn btn-danger" onclick="clearAllRecordingData()">⚠️ Clear ALL Recording Data</button>
+                <div id="data-management-result" class="result" style="display:none;"></div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Sticky VNC Viewer -->
+    <div class="vnc-sticky" id="vnc-sticky" style="display: flex;">
+        <div class="vnc-sticky-header" id="vnc-sticky-header">
+            <h4>🖥️ VNC Viewer</h4>
+            <div class="vnc-sticky-controls">
+                <button id="vnc-toggle-btn">Minimize</button>
+                <button id="vnc-maximize-btn" title="Maximize">⛶</button>
+                <button id="vnc-fullscreen-btn" title="Fullscreen">⛶⛶</button>
+                <button id="vnc-close-btn" title="Close">✕</button>
+            </div>
+        </div>
+        <div class="vnc-sticky-content">
+            <div id="screen-sticky"></div>
+        </div>
+    </div>
+    
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@hostnet/novnc@1.0.0/dist/novnc.min.js"></script>
+    <script>
+        // Get API base URL from input or use default
+        function getAPIBase() {
+            const apiBaseInput = document.getElementById('api-base-url');
+            if (apiBaseInput && apiBaseInput.value) {
+                return apiBaseInput.value;
             }
-
-            $(document).ready(() => {
-                $("#disconnect__button").on("click", function() {
-                    rfb.disconnect()
-                })
-
-                // Connect immediately
-                connectVNC()
+            // Default to port 7070 (from dev:poc: -p 7070:8080)
+            return 'http://127.0.0.1:7070';
+        }
+        
+        let rfb = null;
+        let rfbSticky = null;
+        let vncConnected = false;
+        let isVNCStickyMinimized = false;
+        let isVNCStickyMaximized = false;
+        let isVNCStickyFullscreen = false;
+        let vncStickyOriginalState = { width: '400px', height: '300px', left: '', top: '', right: '20px', bottom: '20px' };
+        
+        // Tab switching
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById(tabName + '-tab').classList.add('active');
+        }
+        
+        // Sticky VNC Functions
+        function toggleVNCSticky() {
+            const sticky = document.getElementById('vnc-sticky');
+            const btn = document.getElementById('vnc-toggle-btn');
+            
+            // Exit fullscreen/maximized first if needed
+            if (isVNCStickyFullscreen) {
+                exitFullscreenVNCSticky();
+            }
+            if (isVNCStickyMaximized) {
+                exitMaximizeVNCSticky();
+            }
+            
+            isVNCStickyMinimized = !isVNCStickyMinimized;
+            sticky.classList.toggle('minimized', isVNCStickyMinimized);
+            btn.textContent = isVNCStickyMinimized ? 'Maximize' : 'Minimize';
+        }
+        
+        function maximizeVNCSticky() {
+            const sticky = document.getElementById('vnc-sticky');
+            const maximizeBtn = document.getElementById('vnc-maximize-btn');
+            
+            if (isVNCStickyFullscreen) {
+                exitFullscreenVNCSticky();
+            }
+            
+            if (!isVNCStickyMaximized) {
+                // Save original state
+                vncStickyOriginalState = {
+                    width: sticky.style.width || '400px',
+                    height: sticky.style.height || '300px',
+                    left: sticky.style.left || '',
+                    top: sticky.style.top || '',
+                    right: sticky.style.right || '20px',
+                    bottom: sticky.style.bottom || '20px'
+                };
+                
+                sticky.classList.add('maximized');
+                isVNCStickyMaximized = true;
+                maximizeBtn.textContent = '⛶';
+                maximizeBtn.title = 'Restore';
+                
+                // Resize VNC after maximizing
+                setTimeout(() => resizeVNCSticky(), 100);
+            } else {
+                exitMaximizeVNCSticky();
+            }
+        }
+        
+        function exitMaximizeVNCSticky() {
+            const sticky = document.getElementById('vnc-sticky');
+            const maximizeBtn = document.getElementById('vnc-maximize-btn');
+            
+            sticky.classList.remove('maximized');
+            isVNCStickyMaximized = false;
+            
+            // Restore original state
+            sticky.style.width = vncStickyOriginalState.width;
+            sticky.style.height = vncStickyOriginalState.height;
+            sticky.style.left = vncStickyOriginalState.left;
+            sticky.style.top = vncStickyOriginalState.top;
+            sticky.style.right = vncStickyOriginalState.right;
+            sticky.style.bottom = vncStickyOriginalState.bottom;
+            
+            maximizeBtn.textContent = '⛶';
+            maximizeBtn.title = 'Maximize';
+            
+            // Resize VNC after restoring - use longer delay
+            setTimeout(() => resizeVNCSticky(), 200);
+        }
+        
+        function fullscreenVNCSticky() {
+            const sticky = document.getElementById('vnc-sticky');
+            const fullscreenBtn = document.getElementById('vnc-fullscreen-btn');
+            
+            if (!isVNCStickyFullscreen) {
+                // Save original state if not already maximized
+                if (!isVNCStickyMaximized) {
+                    vncStickyOriginalState = {
+                        width: sticky.style.width || '400px',
+                        height: sticky.style.height || '300px',
+                        left: sticky.style.left || '',
+                        top: sticky.style.top || '',
+                        right: sticky.style.right || '20px',
+                        bottom: sticky.style.bottom || '20px'
+                    };
+                }
+                
+                sticky.classList.add('fullscreen');
+                isVNCStickyFullscreen = true;
+                fullscreenBtn.textContent = '⛶';
+                fullscreenBtn.title = 'Exit Fullscreen';
+                
+                // Hide other controls when fullscreen
+                document.querySelectorAll('.tab, .container').forEach(el => {
+                    el.style.display = 'none';
+                });
+                
+                // Resize VNC after fullscreen - use longer delay
+                setTimeout(() => resizeVNCSticky(), 200);
+            } else {
+                exitFullscreenVNCSticky();
+            }
+        }
+        
+        function exitFullscreenVNCSticky() {
+            const sticky = document.getElementById('vnc-sticky');
+            const fullscreenBtn = document.getElementById('vnc-fullscreen-btn');
+            
+            sticky.classList.remove('fullscreen');
+            isVNCStickyFullscreen = false;
+            
+            // Restore original state
+            if (isVNCStickyMaximized) {
+                exitMaximizeVNCSticky();
+            } else {
+                sticky.style.width = vncStickyOriginalState.width;
+                sticky.style.height = vncStickyOriginalState.height;
+                sticky.style.left = vncStickyOriginalState.left;
+                sticky.style.top = vncStickyOriginalState.top;
+                sticky.style.right = vncStickyOriginalState.right;
+                sticky.style.bottom = vncStickyOriginalState.bottom;
+            }
+            
+            fullscreenBtn.textContent = '⛶⛶';
+            fullscreenBtn.title = 'Fullscreen';
+            
+            // Show other controls again
+            document.querySelectorAll('.tab, .container').forEach(el => {
+                el.style.display = '';
+            });
+            
+            // Resize VNC after exiting fullscreen - use longer delay
+            setTimeout(() => resizeVNCSticky(), 200);
+        }
+        
+        // Handle ESC key to exit fullscreen
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && isVNCStickyFullscreen) {
+                exitFullscreenVNCSticky();
+            }
+        });
+        
+        function closeVNCSticky() {
+            const sticky = document.getElementById('vnc-sticky');
+            sticky.style.display = 'none';
+            if (rfbSticky) {
+                rfbSticky.disconnect();
+                rfbSticky = null;
+            }
+            // Reset states
+            isVNCStickyMinimized = false;
+            isVNCStickyMaximized = false;
+            isVNCStickyFullscreen = false;
+        }
+        
+        function showVNCSticky() {
+            const sticky = document.getElementById('vnc-sticky');
+            if (sticky) {
+                sticky.style.display = 'flex';
+            }
+        }
+        
+        // Resize VNC viewer when container size changes
+        let lastResizeWidth = 0;
+        let lastResizeHeight = 0;
+        function resizeVNCSticky() {
+            if (!rfbSticky) return;
+            
+            // Check if connected (try multiple ways to check connection state)
+            const isConnected = rfbSticky._rfbConnectionState === 'connected' || 
+                               rfbSticky._rfbConnectionState === 'normal' ||
+                               (rfbSticky._display && rfbSticky._display._target);
+            
+            if (!isConnected) return;
+            
+            const container = document.getElementById('screen-sticky');
+            if (!container || !container.parentElement) return;
+            
+            const content = container.parentElement;
+            const width = Math.floor(content.clientWidth);
+            const height = Math.floor(content.clientHeight);
+            
+            if (width <= 0 || height <= 0) return;
+            
+            // Only resize if dimensions actually changed significantly (more than 2px difference)
+            if (Math.abs(lastResizeWidth - width) < 2 && Math.abs(lastResizeHeight - height) < 2) {
+                return;
+            }
+            
+            lastResizeWidth = width;
+            lastResizeHeight = height;
+            
+            // Only update CSS size - DO NOT modify canvas.width/height as it clears the buffer
+            if (container.style) {
+                container.style.width = width + 'px';
+                container.style.height = height + 'px';
+            }
+            
+            // Use RFB's resize method - this handles canvas sizing properly without clearing
+            if (rfbSticky._display && typeof rfbSticky._display.resize === 'function') {
+                try {
+                    rfbSticky._display.resize(width, height);
+                } catch (e) {
+                    console.warn('RFB resize error:', e);
+                }
+            }
+        }
+        
+        // Setup resize observer to handle container resizing
+        let resizeObserver = null;
+        let resizeTimeout = null;
+        let windowResizeTimeout = null;
+        
+        function setupVNCResizeObserver() {
+            const sticky = document.getElementById('vnc-sticky');
+            if (!sticky) return;
+            
+            // Use ResizeObserver to detect size changes with debouncing
+            if (window.ResizeObserver) {
+                resizeObserver = new ResizeObserver(() => {
+                    // Debounce to avoid too frequent resizes that might interfere with VNC
+                    clearTimeout(resizeTimeout);
+                    resizeTimeout = setTimeout(() => {
+                        resizeVNCSticky();
+                    }, 300); // Longer debounce to avoid interfering with VNC display
+                });
+                resizeObserver.observe(sticky);
+                
+                // Also observe the content area
+                const content = sticky.querySelector('.vnc-sticky-content');
+                if (content) {
+                    resizeObserver.observe(content);
+                }
+            }
+            
+            // Also listen to window resize with debouncing
+            window.addEventListener('resize', () => {
+                clearTimeout(windowResizeTimeout);
+                windowResizeTimeout = setTimeout(() => {
+                    resizeVNCSticky();
+                }, 300);
+            });
+        }
+        
+        // Make VNC sticky draggable
+        let isDragging = false;
+        let initialX, initialY;
+        
+        $(document).ready(() => {
+            const stickyHeader = document.getElementById('vnc-sticky-header');
+            if (stickyHeader) {
+                stickyHeader.addEventListener('mousedown', (e) => {
+                    // Don't start dragging if clicking on buttons
+                    if (e.target.tagName === 'BUTTON' || e.target.closest('button')) {
+                        return;
+                    }
+                    isDragging = true;
+                    const sticky = document.getElementById('vnc-sticky');
+                    const rect = sticky.getBoundingClientRect();
+                    initialX = e.clientX - rect.left;
+                    initialY = e.clientY - rect.top;
+                });
+            }
+            
+            // Ensure buttons work properly - use event listeners instead of onclick
+            const maximizeBtn = document.getElementById('vnc-maximize-btn');
+            const fullscreenBtn = document.getElementById('vnc-fullscreen-btn');
+            const toggleBtn = document.getElementById('vnc-toggle-btn');
+            const closeBtn = document.getElementById('vnc-close-btn');
+            
+            if (maximizeBtn) {
+                maximizeBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    maximizeVNCSticky();
+                });
+            }
+            if (fullscreenBtn) {
+                fullscreenBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    fullscreenVNCSticky();
+                });
+            }
+            if (toggleBtn) {
+                toggleBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    toggleVNCSticky();
+                });
+            }
+            if (closeBtn) {
+                closeBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    closeVNCSticky();
+                });
+            }
+        });
+        
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            const sticky = document.getElementById('vnc-sticky');
+            if (sticky) {
+                sticky.style.left = (e.clientX - initialX) + 'px';
+                sticky.style.top = (e.clientY - initialY) + 'px';
+                sticky.style.right = 'auto';
+                sticky.style.bottom = 'auto';
+            }
+        });
+        
+        document.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+        
+        // VNC API Key Functions for Connect Section
+        async function registerVNCApiKeyForConnect() {
+            const host = document.getElementById('vnc-host').value;
+            const port = document.getElementById('vnc-port').value;
+            const apiKey = document.getElementById('vnc-connect-apikey').value;
+            
+            if (!apiKey) {
+                alert('Please enter an API key to register');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`http://${host}:${port}/apiKeys/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ apiKey })
+                });
+                const data = await response.json();
+                showResult('vnc-apikey-status', { success: response.ok, message: response.ok ? `API key "${apiKey}" registered!` : 'Failed', data });
+            } catch (error) {
+                showResult('vnc-apikey-status', { success: false, error: error.message, hint: 'Make sure New VNC (vncVersion: new) is running' });
+            }
+        }
+        
+        async function unregisterVNCApiKeyForConnect() {
+            const host = document.getElementById('vnc-host').value;
+            const port = document.getElementById('vnc-port').value;
+            const apiKey = document.getElementById('vnc-connect-apikey').value;
+            
+            if (!apiKey) {
+                alert('Please enter an API key to unregister');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`http://${host}:${port}/apiKeys/${encodeURIComponent(apiKey)}`, {
+                    method: 'DELETE'
+                });
+                const data = await response.json();
+                showResult('vnc-apikey-status', { success: response.ok, message: response.ok ? `API key "${apiKey}" unregistered!` : 'Failed', data });
+            } catch (error) {
+                showResult('vnc-apikey-status', { success: false, error: error.message });
+            }
+        }
+        
+        async function fetchRegisteredClients() {
+            const host = document.getElementById('vnc-host').value;
+            const port = document.getElementById('vnc-port').value;
+            
+            try {
+                const [clientsRes, permsRes] = await Promise.all([
+                    fetch(`http://${host}:${port}/clients`),
+                    fetch(`http://${host}:${port}/clients/permissions`)
+                ]);
+                const clients = await clientsRes.json();
+                const permissions = await permsRes.json();
+                showResult('vnc-apikey-status', { 
+                    success: true, 
+                    connectedClients: clients,
+                    clientPermissions: permissions
+                });
+            } catch (error) {
+                showResult('vnc-apikey-status', { success: false, error: error.message, hint: 'Make sure New VNC (vncVersion: new) is running' });
+            }
+        }
+        
+        async function fetchVNCStatusForConnect() {
+            const host = document.getElementById('vnc-host').value;
+            const port = document.getElementById('vnc-port').value;
+            
+            try {
+                const response = await fetch(`http://${host}:${port}/status`);
+                const data = await response.json();
+                showResult('vnc-apikey-status', { success: response.ok, vncStatus: data });
+            } catch (error) {
+                showResult('vnc-apikey-status', { success: false, error: error.message, hint: 'VNC server may not be running or using Legacy VNC' });
+            }
+        }
+        
+        // Generate random client ID if not provided
+        function generateClientId() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                const r = Math.random() * 16 | 0;
+                const v = c === 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+        
+        // VNC Functions
+        function connectVNC() {
+            const host = document.getElementById('vnc-host').value;
+            const port = document.getElementById('vnc-port').value;
+            const apiKey = document.getElementById('vnc-connect-apikey').value || 'default-api-key';
+            const clientId = document.getElementById('vnc-connect-clientid').value || generateClientId();
+            
+            // Update client ID field if it was empty
+            if (!document.getElementById('vnc-connect-clientid').value) {
+                document.getElementById('vnc-connect-clientid').value = clientId;
+            }
+            
+            const vncUrl = `ws://${host}:${port}?apiKey=${encodeURIComponent(apiKey)}&clientId=${encodeURIComponent(clientId)}`;
+            
+            // Connect to sticky viewer
+            connectVNCSticky(vncUrl);
+            
+            // Also connect to main viewer if it exists
+            if (document.getElementById('screen')) {
+                if (rfb) {
+                    rfb.disconnect();
+                }
+                rfb = new RFB(document.getElementById('screen'), vncUrl);
+                rfb.viewOnly = false;
+                rfb.scaleViewport = false;
+                rfb.addEventListener('connect', () => {
+                    vncConnected = true;
+                    updateVNCStatus(true);
+                });
+                rfb.addEventListener('disconnect', () => {
+                    vncConnected = false;
+                    updateVNCStatus(false);
+                });
+            }
+        }
+        
+        function connectVNCSticky(vncUrl = null) {
+            if (!vncUrl) {
+                const host = document.getElementById('vnc-host').value;
+                const port = document.getElementById('vnc-port').value;
+                const apiKey = document.getElementById('vnc-connect-apikey').value || 'default-api-key';
+                const clientId = document.getElementById('vnc-connect-clientid').value || generateClientId();
+                vncUrl = `ws://${host}:${port}?apiKey=${encodeURIComponent(apiKey)}&clientId=${encodeURIComponent(clientId)}`;
+            }
+            
+            showVNCSticky();
+            
+            if (rfbSticky) {
+                rfbSticky.disconnect();
+            }
+            
+            rfbSticky = new RFB(document.getElementById('screen-sticky'), vncUrl);
+            rfbSticky.viewOnly = false;
+            rfbSticky.scaleViewport = true;
+            
+            rfbSticky.addEventListener('connect', () => {
+                vncConnected = true;
+                updateVNCStatus(true);
+                // Don't resize immediately - let RFB initialize and display first
+                // RFB will handle initial sizing automatically with scaleViewport
+            });
+            
+            rfbSticky.addEventListener('disconnect', () => {
+                vncConnected = false;
+                updateVNCStatus(false);
+            });
+            
+            // Setup resize observer for VNC viewer
+            setupVNCResizeObserver();
+        }
+        
+        function disconnectVNC() {
+            if (rfb) {
+                rfb.disconnect();
+                rfb = null;
+            }
+            if (rfbSticky) {
+                rfbSticky.disconnect();
+                rfbSticky = null;
+            }
+            updateVNCStatus(false);
+        }
+        
+        function updateVNCStatus(connected) {
+            const statusEl = document.getElementById('vnc-status');
+            if (statusEl) {
+                const indicator = statusEl.querySelector('.status-indicator');
+                indicator.className = 'status-indicator ' + (connected ? 'connected' : 'disconnected');
+                statusEl.querySelector('span:last-child').textContent = connected ? 'Connected' : 'Disconnected';
+            }
+        }
+        
+        // HTML Escape Helper
+        function escapeHtml(unsafe) {
+            if (unsafe === null || unsafe === undefined) return '';
+            return String(unsafe)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+        
+        // API Helper
+        async function apiCall(method, endpoint, body = null, isFile = false) {
+            try {
+                const options = {
+                    method,
+                    headers: {}
+                };
+                
+                if (body && !isFile) {
+                    options.headers['Content-Type'] = 'application/json';
+                    options.body = JSON.stringify(body);
+                } else if (body && isFile) {
+                    options.body = body;
+                }
+                
+                const API_BASE = getAPIBase();
+                const response = await fetch(`${API_BASE}${endpoint}`, options);
+                const data = await response.json();
+                
+                return {
+                    success: response.ok,
+                    status: response.status,
+                    data
+                };
+            } catch (error) {
+                return {
+                    success: false,
+                    error: error.message
+                };
+            }
+        }
+        
+        function showResult(elementId, result, isImage = false) {
+            const el = document.getElementById(elementId);
+            el.style.display = 'block';
+            
+            if (isImage && result.success && result.data.image) {
+                el.innerHTML = `<img src="${result.data.image}" class="screenshot-preview" />`;
+            } else {
+                el.className = 'result ' + (result.success ? 'success' : 'error');
+                el.innerHTML = `<pre>${escapeHtml(JSON.stringify(result, null, 2))}</pre>`;
+            }
+        }
+        
+        // Mouse Functions
+        async function testMouse() {
+            const body = {};
+            if (document.getElementById('mouse-move').checked) {
+                body.x = parseInt(document.getElementById('mouse-x').value);
+                body.y = parseInt(document.getElementById('mouse-y').value);
+                body.move = true;
+            }
+            const action = document.getElementById('mouse-action').value;
+            if (action) {
+                body.action = action;
+                body.button = document.getElementById('mouse-button').value;
+            } else if (document.getElementById('mouse-button').value) {
+                body.click = document.getElementById('mouse-button').value;
+                body.doubleClick = document.getElementById('mouse-double-click').checked;
+            }
+            const result = await apiCall('POST', '/system/mouse', body);
+            showResult('mouse-result', result);
+        }
+        
+        async function testMouseMoveOnly() {
+            const x = parseInt(document.getElementById('mouse-x').value);
+            const y = parseInt(document.getElementById('mouse-y').value);
+            const result = await apiCall('POST', '/system/mouse', { x, y, move: true });
+            showResult('mouse-result', result);
+        }
+        
+        async function testMouseLocation() {
+            const result = await apiCall('GET', '/system/mouse/location');
+            showResult('mouse-result', result);
+        }
+        
+        async function testMouseState() {
+            const result = await apiCall('GET', '/system/mouse/state');
+            showResult('mouse-result', result);
+        }
+        
+        // Keyboard Functions
+        async function testKeyboard() {
+            const body = {};
+            const text = document.getElementById('keyboard-text').value;
+            const key = document.getElementById('keyboard-key').value;
+            
+            if (text) {
+                body.text = text;
+                const delayMin = parseInt(document.getElementById('keyboard-delay-min').value);
+                const delayMax = parseInt(document.getElementById('keyboard-delay-max').value);
+                if (delayMin > 0 || delayMax > 0) {
+                    body.delayMin = delayMin;
+                    body.delayMax = delayMax;
+                }
+            } else if (key) {
+                body.key = key;
+                body.type = document.getElementById('keyboard-type').value;
+            }
+            
+            const modifiers = Array.from(document.getElementById('keyboard-modifiers').selectedOptions).map(o => o.value);
+            if (modifiers.length > 0) {
+                body.modifiers = modifiers;
+            }
+            
+            const result = await apiCall('POST', '/system/keyboard', body);
+            showResult('keyboard-result', result);
+        }
+        
+        async function testKeyboardState() {
+            const result = await apiCall('GET', '/system/keyboard/state');
+            showResult('keyboard-result', result);
+        }
+        
+        // Clipboard Functions
+        async function testClipboardSet() {
+            const content = document.getElementById('clipboard-content').value;
+            const result = await apiCall('POST', '/system/clipboard', { content });
+            showResult('clipboard-result', result);
+        }
+        
+        async function testClipboardGet() {
+            const result = await apiCall('GET', '/system/clipboard');
+            if (result.success) {
+                document.getElementById('clipboard-content').value = result.data.content || '';
+            }
+            showResult('clipboard-result', result);
+        }
+        
+        // Screenshot Function
+        async function testScreenshot() {
+            const quality = parseInt(document.getElementById('screenshot-quality').value);
+            const result = await apiCall('GET', `/system/screenshot?quality=${quality}`);
+            showResult('screenshot-result', result, true);
+        }
+        
+        // Drag Function
+        async function testDrag() {
+            const body = {
+                startX: parseInt(document.getElementById('drag-start-x').value),
+                startY: parseInt(document.getElementById('drag-start-y').value),
+                endX: parseInt(document.getElementById('drag-end-x').value),
+                endY: parseInt(document.getElementById('drag-end-y').value),
+                button: document.getElementById('drag-button').value,
+                duration: parseInt(document.getElementById('drag-duration').value)
+            };
+            const result = await apiCall('POST', '/system/drag', body);
+            showResult('drag-result', result);
+        }
+        
+        // Scroll Function
+        async function testScroll() {
+            const body = {
+                scrollBy: parseInt(document.getElementById('scroll-amount').value),
+                direction: document.getElementById('scroll-direction').value
+            };
+            const result = await apiCall('POST', '/system/scroll', body);
+            showResult('scroll-result', result);
+        }
+        
+        // Screen Size Function
+        async function testScreenSize() {
+            const result = await apiCall('GET', '/system/screen/size');
+            showResult('screen-result', result);
+        }
+        
+        async function testIsBrowserActive() {
+            const result = await apiCall('GET', '/system/isBrowserActive');
+            showResult('screen-result', result);
+        }
+        
+        // Windows Functions
+        async function testWindows() {
+            const result = await apiCall('GET', '/system/windows');
+            showResult('windows-result', result);
+        }
+        
+        async function testWindowControl() {
+            const body = {
+                action: document.getElementById('window-action').value
+            };
+            const windowId = document.getElementById('window-id').value;
+            const windowName = document.getElementById('window-name').value;
+            
+            if (windowId) body.windowId = parseInt(windowId);
+            if (windowName) body.windowName = windowName;
+            
+            const result = await apiCall('POST', '/system/window/control', body);
+            showResult('windows-result', result);
+        }
+        
+        // Shell Command Function
+        async function testShellCommand() {
+            const body = {
+                command: document.getElementById('shell-command').value,
+                timeout: parseInt(document.getElementById('shell-timeout').value)
+            };
+            const result = await apiCall('POST', '/system/shell', body);
+            showResult('shell-result', result);
+        }
+        
+        // File Functions
+        async function testFilesList() {
+            const result = await apiCall('GET', '/files/list');
+            showResult('files-list-result', result);
+        }
+        
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            fetch(`${getAPIBase()}/files/upload`, {
+                method: 'POST',
+                body: formData
             })
-        </script>
-    </body>
+            .then(res => res.json())
+            .then(data => {
+                showResult('file-upload-result', { success: true, data });
+            })
+            .catch(error => {
+                showResult('file-upload-result', { success: false, error: error.message });
+            });
+        }
+        
+        async function testFileDownload() {
+            const fileName = document.getElementById('download-filename').value;
+            if (!fileName) {
+                alert('Please enter a file name');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${getAPIBase()}/files/download/${fileName}`);
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = fileName;
+                    a.click();
+                    showResult('file-download-result', { success: true, message: 'File downloaded' });
+                } else {
+                    const data = await response.json();
+                    showResult('file-download-result', { success: false, data });
+                }
+            } catch (error) {
+                showResult('file-download-result', { success: false, error: error.message });
+            }
+        }
+        
+        // Session Functions
+        async function testSessionData() {
+            const result = await apiCall('GET', '/session/data');
+            showResult('session-data-result', result);
+        }
+        
+        function handleSessionSelect(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const formData = new FormData();
+            formData.append('session', file);
+            
+            fetch(`${getAPIBase()}/session/upload`, {
+                method: 'POST',
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                showResult('session-upload-result', { success: true, data });
+            })
+            .catch(error => {
+                showResult('session-upload-result', { success: false, error: error.message });
+            });
+        }
+        
+        async function testSessionDownload() {
+            try {
+                const response = await fetch(`${getAPIBase()}/session/download`, { method: 'POST' });
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `session-${Date.now()}.tar.gz`;
+                    a.click();
+                    showResult('session-download-result', { success: true, message: 'Session downloaded' });
+                } else {
+                    const data = await response.json();
+                    showResult('session-download-result', { success: false, data });
+                }
+            } catch (error) {
+                showResult('session-download-result', { success: false, error: error.message });
+            }
+        }
+        
+        async function testSessionSet() {
+            const dataText = document.getElementById('session-set-data').value;
+            let sessionData;
+            try {
+                sessionData = JSON.parse(dataText);
+            } catch (e) {
+                alert('Invalid JSON');
+                return;
+            }
+            const result = await apiCall('POST', '/session/set', sessionData);
+            showResult('session-set-result', result);
+        }
+        
+        // File upload drag and drop
+        const fileUploadArea = document.getElementById('file-upload-area');
+        fileUploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            fileUploadArea.classList.add('dragover');
+        });
+        fileUploadArea.addEventListener('dragleave', () => {
+            fileUploadArea.classList.remove('dragover');
+        });
+        fileUploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            fileUploadArea.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            if (file) {
+                const formData = new FormData();
+                formData.append('file', file);
+                fetch(`${getAPIBase()}/files/upload`, {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(res => res.json())
+                .then(data => {
+                    showResult('file-upload-result', { success: true, data });
+                })
+                .catch(error => {
+                    showResult('file-upload-result', { success: false, error: error.message });
+                });
+            }
+        });
+        
+        // Action Functions
+        function onRecordDataChange() {
+            const recordData = document.getElementById('launch-record-data').checked;
+            const vncVersionSelect = document.getElementById('launch-vnc-version');
+            const warning = document.getElementById('vnc-version-warning');
+            
+            if (recordData) {
+                if (vncVersionSelect.value !== 'new') {
+                    warning.style.display = 'block';
+                } else {
+                    warning.style.display = 'none';
+                }
+            } else {
+                warning.style.display = 'none';
+            }
+        }
+        
+        // Also check when VNC version changes
+        document.addEventListener('DOMContentLoaded', () => {
+            const vncVersionSelect = document.getElementById('launch-vnc-version');
+            if (vncVersionSelect) {
+                vncVersionSelect.addEventListener('change', onRecordDataChange);
+            }
+        });
+        
+        async function testLaunch() {
+            const recordData = document.getElementById('launch-record-data').checked;
+            const vncVersion = document.getElementById('launch-vnc-version').value;
+            
+            const body = {
+                driver: document.getElementById('launch-driver').value,
+                screen: {
+                    resolution: document.getElementById('launch-resolution').value
+                },
+                leaseTime: parseInt(document.getElementById('launch-lease-time').value),
+                platform: document.getElementById('launch-platform').value,
+                language: document.getElementById('launch-language').value,
+                timezone: document.getElementById('launch-timezone').value,
+                vnc: {
+                    mode: document.getElementById('launch-vnc-mode').value,
+                    isPasswordProtected: document.getElementById('launch-vnc-password').checked
+                },
+                vncVersion: vncVersion,
+                recordData: recordData
+            };
+            const result = await apiCall('POST', '/action/launch', body);
+            showResult('launch-result', result);
+            
+            // If recording enabled, update recording status
+            if (recordData && result.success && result.data.recordingSessionId) {
+                currentRecordingSessionId = result.data.recordingSessionId;
+                updateRecordingUI(true, currentRecordingSessionId);
+            }
+        }
+        
+        // ==================== Recording Functions ====================
+        let currentRecordingSessionId = null;
+        let recordingStartTime = null;
+        let recordingDurationInterval = null;
+        
+        function updateRecordingUI(isRecording, sessionId = null) {
+            const indicator = document.getElementById('recording-indicator');
+            const statusText = document.getElementById('recording-status-text');
+            const sessionInfo = document.getElementById('recording-session-info');
+            
+            if (isRecording) {
+                indicator.style.background = '#dc3545';
+                indicator.style.animation = 'pulse 1s infinite';
+                statusText.textContent = 'Recording Active';
+                statusText.style.color = '#dc3545';
+                sessionInfo.style.display = 'block';
+                document.getElementById('recording-session-id').textContent = sessionId || '-';
+                
+                if (!recordingStartTime) {
+                    recordingStartTime = new Date();
+                }
+                document.getElementById('recording-started-at').textContent = recordingStartTime.toLocaleString();
+                
+                // Update duration every second
+                if (recordingDurationInterval) clearInterval(recordingDurationInterval);
+                recordingDurationInterval = setInterval(updateRecordingDuration, 1000);
+            } else {
+                indicator.style.background = '#6c757d';
+                indicator.style.animation = 'none';
+                statusText.textContent = 'Not Recording';
+                statusText.style.color = '#6c757d';
+                sessionInfo.style.display = 'none';
+                
+                if (recordingDurationInterval) {
+                    clearInterval(recordingDurationInterval);
+                    recordingDurationInterval = null;
+                }
+                recordingStartTime = null;
+            }
+        }
+        
+        function updateRecordingDuration() {
+            if (!recordingStartTime) return;
+            const now = new Date();
+            const diff = Math.floor((now - recordingStartTime) / 1000);
+            const hours = Math.floor(diff / 3600);
+            const minutes = Math.floor((diff % 3600) / 60);
+            const seconds = diff % 60;
+            document.getElementById('recording-duration').textContent = 
+                `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        }
+        
+        async function checkRecordingStatus() {
+            // Check if browser is running and has recording enabled
+            const result = await apiCall('GET', '/action/status');
+            if (result.success && result.data) {
+                // API returns isRecording (not recordData)
+                const isRecording = result.data.isRecording || false;
+                const sessionId = result.data.sessionId || result.data.browserID;
+                currentRecordingSessionId = sessionId;
+                
+                // Use startedAt from API if available
+                if (result.data.startedAt && isRecording) {
+                    recordingStartTime = new Date(result.data.startedAt);
+                }
+                
+                updateRecordingUI(isRecording, sessionId);
+                
+                if (isRecording) {
+                    // Also fetch summary
+                    fetchSessionSummary();
+                }
+            } else {
+                updateRecordingUI(false);
+            }
+            // Don't show raw result - UI is already updated
+        }
+        
+        async function fetchSessionSummary() {
+            const sessionId = currentRecordingSessionId || document.getElementById('raw-session-id').value;
+            const result = await apiCall('GET', `/recording/summary${sessionId ? '?sessionId=' + sessionId : ''}`);
+            
+            if (result.success && result.data) {
+                const summary = result.data.summary || result.data;
+                document.getElementById('stat-system-actions').textContent = summary.systemActionsCount || 0;
+                document.getElementById('stat-network-requests').textContent = summary.networkRequestsCount || 0;
+                document.getElementById('stat-cdp-events').textContent = summary.cdpEventsCount || 0;
+                document.getElementById('stat-vnc-frames').textContent = summary.vncFramesCount || 0;
+            }
+            showResult('session-summary-result', result);
+        }
+        
+        async function exportRecordingData() {
+            const sessionId = currentRecordingSessionId || document.getElementById('raw-session-id').value;
+            const result = await apiCall('GET', `/recording/export${sessionId ? '?sessionId=' + sessionId : ''}`);
+            
+            if (result.success) {
+                // Download as JSON file
+                const dataStr = JSON.stringify(result.data, null, 2);
+                const blob = new Blob([dataStr], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `recording-${sessionId || 'current'}-${Date.now()}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+            }
+            showResult('session-summary-result', result);
+        }
+        
+        async function fetchSystemActions() {
+            const sessionId = currentRecordingSessionId || document.getElementById('raw-session-id').value;
+            const type = document.getElementById('action-type-filter').value;
+            const limit = document.getElementById('action-limit').value;
+            
+            let url = `/recording/actions?limit=${limit}`;
+            if (sessionId) url += `&sessionId=${sessionId}`;
+            if (type) url += `&type=${type}`;
+            
+            const result = await apiCall('GET', url);
+            
+            if (result.success && result.data) {
+                const actions = result.data.actions || result.data;
+                let html = '<div style="font-family: monospace; font-size: 12px;">';
+                
+                if (Array.isArray(actions)) {
+                    actions.forEach((action, idx) => {
+                        const time = new Date(action.timestamp).toLocaleTimeString();
+                        const typeColor = {
+                            'keyboard': '#2196f3',
+                            'mouse': '#4caf50',
+                            'scroll': '#ff9800',
+                            'drag': '#9c27b0'
+                        }[action.actionType] || '#666';
+                        
+                        html += `<div style="padding: 8px; margin: 4px 0; background: #f5f5f5; border-radius: 4px; border-left: 3px solid ${typeColor};">
+                            <span style="color: #999; margin-right: 10px;">[${time}]</span>
+                            <span style="font-weight: bold; color: ${typeColor};">${action.actionType}</span>
+                            <pre style="margin: 5px 0 0 0; color: #333;">${escapeHtml(JSON.stringify(JSON.parse(action.data || '{}'), null, 2))}</pre>
+                        </div>`;
+                    });
+                }
+                
+                html += '</div>';
+                document.getElementById('system-actions-log').innerHTML = html;
+                document.getElementById('system-actions-log').style.display = 'block';
+            } else {
+                showResult('system-actions-log', result);
+            }
+        }
+        
+        function clearActionsLog() {
+            document.getElementById('system-actions-log').style.display = 'none';
+            document.getElementById('system-actions-log').innerHTML = '';
+        }
+        
+        async function fetchNetworkRequests() {
+            const sessionId = currentRecordingSessionId || document.getElementById('raw-session-id').value;
+            const urlFilter = document.getElementById('network-url-filter').value;
+            const methodFilter = document.getElementById('network-method-filter').value;
+            const limit = document.getElementById('network-limit').value;
+            
+            let url = `/recording/network?limit=${limit}`;
+            if (sessionId) url += `&sessionId=${sessionId}`;
+            if (urlFilter) url += `&url=${encodeURIComponent(urlFilter)}`;
+            if (methodFilter) url += `&method=${methodFilter}`;
+            
+            const result = await apiCall('GET', url);
+            
+            if (result.success && result.data) {
+                const requests = result.data.requests || result.data;
+                let html = '<div style="font-family: monospace; font-size: 11px;">';
+                
+                if (Array.isArray(requests)) {
+                    requests.forEach((req, idx) => {
+                        const time = new Date(req.timestamp).toLocaleTimeString();
+                        const statusColor = req.responseStatus >= 400 ? '#dc3545' : 
+                                          req.responseStatus >= 300 ? '#ff9800' : '#28a745';
+                        const methodColor = {
+                            'GET': '#2196f3',
+                            'POST': '#4caf50',
+                            'PUT': '#ff9800',
+                            'DELETE': '#dc3545',
+                            'PATCH': '#9c27b0'
+                        }[req.method] || '#666';
+                        
+                        html += `<div style="padding: 8px; margin: 4px 0; background: #f5f5f5; border-radius: 4px;">
+                            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                                <span style="color: #999;">[${time}]</span>
+                                <span style="font-weight: bold; color: ${methodColor}; padding: 2px 6px; background: ${methodColor}22; border-radius: 3px;">${req.method}</span>
+                                <span style="color: ${statusColor}; font-weight: bold;">${req.responseStatus || 'pending'}</span>
+                                <span style="color: #333; word-break: break-all; flex: 1;">${req.url}</span>
+                            </div>
+                            <details style="margin-top: 5px;">
+                                <summary style="cursor: pointer; color: #666;">Details</summary>
+                                <pre style="margin: 5px 0 0 0; color: #333; font-size: 10px; max-height: 200px; overflow: auto;">${escapeHtml(JSON.stringify(req, null, 2))}</pre>
+                            </details>
+                        </div>`;
+                    });
+                }
+                
+                html += '</div>';
+                document.getElementById('network-requests-log').innerHTML = html;
+                document.getElementById('network-requests-log').style.display = 'block';
+            } else {
+                showResult('network-requests-log', result);
+            }
+        }
+        
+        function clearNetworkLog() {
+            document.getElementById('network-requests-log').style.display = 'none';
+            document.getElementById('network-requests-log').innerHTML = '';
+        }
+        
+        async function fetchCDPEvents() {
+            const sessionId = currentRecordingSessionId || document.getElementById('raw-session-id').value;
+            const methodFilter = document.getElementById('cdp-method-filter').value;
+            const directionFilter = document.getElementById('cdp-direction-filter').value;
+            const limit = document.getElementById('cdp-limit').value;
+            
+            let url = `/recording/cdp?limit=${limit}`;
+            if (sessionId) url += `&sessionId=${sessionId}`;
+            if (methodFilter) url += `&method=${encodeURIComponent(methodFilter)}`;
+            if (directionFilter) url += `&direction=${directionFilter}`;
+            
+            const result = await apiCall('GET', url);
+            
+            if (result.success && result.data) {
+                const events = result.data.events || result.data;
+                let html = '<div style="font-family: monospace; font-size: 11px;">';
+                
+                if (Array.isArray(events)) {
+                    events.forEach((event, idx) => {
+                        const time = new Date(event.timestamp).toLocaleTimeString();
+                        const dirColor = event.direction === 'sent' ? '#2196f3' : '#4caf50';
+                        const dirIcon = event.direction === 'sent' ? '→' : '←';
+                        
+                        html += `<div style="padding: 8px; margin: 4px 0; background: #f5f5f5; border-radius: 4px; border-left: 3px solid ${dirColor};">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <span style="color: #999;">[${time}]</span>
+                                <span style="font-weight: bold; color: ${dirColor};">${dirIcon}</span>
+                                <span style="font-weight: bold; color: #333;">${event.method}</span>
+                            </div>
+                            <details style="margin-top: 5px;">
+                                <summary style="cursor: pointer; color: #666;">Params</summary>
+                                <pre style="margin: 5px 0 0 0; color: #333; font-size: 10px; max-height: 200px; overflow: auto;">${escapeHtml(JSON.stringify(JSON.parse(event.params || '{}'), null, 2))}</pre>
+                            </details>
+                        </div>`;
+                    });
+                }
+                
+                html += '</div>';
+                document.getElementById('cdp-events-log').innerHTML = html;
+                document.getElementById('cdp-events-log').style.display = 'block';
+            } else {
+                showResult('cdp-events-log', result);
+            }
+        }
+        
+        function clearCDPLog() {
+            document.getElementById('cdp-events-log').style.display = 'none';
+            document.getElementById('cdp-events-log').innerHTML = '';
+        }
+        
+        // VNC Recording status polling interval
+        let vncRecordingStatusInterval = null;
+        
+        async function startVNCRecording() {
+            const port = document.getElementById('vnc-recording-port').value;
+            const sessionId = document.getElementById('vnc-recording-session-id').value || `recording-${Date.now()}`;
+            
+            try {
+                showResult('vnc-recording-result', { success: true, data: { message: 'Starting recording...' } });
+                
+                const response = await fetch(`http://localhost:${port}/recording/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sessionId })
+                });
+                const data = await response.json();
+                
+                if (response.ok) {
+                    // Show live status and start polling
+                    document.getElementById('vnc-recording-live-status').style.display = 'block';
+                    startRecordingStatusPolling();
+                }
+                
+                showResult('vnc-recording-result', { success: response.ok, data });
+            } catch (error) {
+                showResult('vnc-recording-result', { success: false, error: error.message });
+            }
+        }
+        
+        async function stopVNCRecording() {
+            const port = document.getElementById('vnc-recording-port').value;
+            
+            try {
+                const response = await fetch(`http://localhost:${port}/recording/stop`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                
+                // Stop polling and hide live status
+                stopRecordingStatusPolling();
+                document.getElementById('vnc-recording-live-status').style.display = 'none';
+                
+                // Refresh recordings list
+                await listVNCRecordings();
+                
+                showResult('vnc-recording-result', { success: response.ok, data });
+            } catch (error) {
+                showResult('vnc-recording-result', { success: false, error: error.message });
+            }
+        }
+        
+        async function fetchVNCRecordingStatus() {
+            const port = document.getElementById('vnc-recording-port').value;
+            
+            try {
+                const response = await fetch(`http://localhost:${port}/recording/status`);
+                const data = await response.json();
+                
+                // Update live status display if recording
+                if (data.isRecording) {
+                    document.getElementById('vnc-recording-live-status').style.display = 'block';
+                    document.getElementById('live-session-id').textContent = data.sessionId || '-';
+                    document.getElementById('live-connected').textContent = data.isConnected ? '✅ Yes' : '❌ No';
+                    document.getElementById('live-frame-count').textContent = data.frameCount || 0;
+                    document.getElementById('live-bytes-written').textContent = formatBytes(data.bytesWritten || 0);
+                    document.getElementById('live-resolution').textContent = data.width && data.height ? `${data.width}x${data.height}` : '-';
+                    document.getElementById('live-duration').textContent = formatDuration(data.duration || 0);
+                } else {
+                    document.getElementById('vnc-recording-live-status').style.display = 'none';
+                }
+                
+                showResult('vnc-recording-result', { success: response.ok, data });
+            } catch (error) {
+                showResult('vnc-recording-result', { success: false, error: error.message });
+            }
+        }
+        
+        function startRecordingStatusPolling() {
+            stopRecordingStatusPolling();
+            vncRecordingStatusInterval = setInterval(fetchVNCRecordingStatus, 1000);
+        }
+        
+        function stopRecordingStatusPolling() {
+            if (vncRecordingStatusInterval) {
+                clearInterval(vncRecordingStatusInterval);
+                vncRecordingStatusInterval = null;
+            }
+        }
+        
+        function formatBytes(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+        }
+        
+        function formatDuration(ms) {
+            const seconds = Math.floor(ms / 1000);
+            const minutes = Math.floor(seconds / 60);
+            const hours = Math.floor(minutes / 60);
+            if (hours > 0) return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
+            if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
+            return `${seconds}s`;
+        }
+        
+        async function createVNCSnapshot() {
+            const port = document.getElementById('vnc-recording-port').value;
+            
+            try {
+                const response = await fetch(`http://localhost:${port}/recording/snapshot`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                
+                if (response.ok) {
+                    // Refresh the recordings list to show the new snapshot
+                    await listVNCRecordings();
+                }
+                
+                showResult('vnc-recording-result', { success: response.ok, data });
+            } catch (error) {
+                showResult('vnc-recording-result', { success: false, error: error.message });
+            }
+        }
+        
+        async function listVNCRecordings() {
+            const port = document.getElementById('vnc-playback-port').value;
+            
+            try {
+                const response = await fetch(`http://localhost:${port}/recording/list`);
+                const data = await response.json();
+                
+                const tbody = document.getElementById('vnc-recordings-tbody');
+                tbody.innerHTML = '';
+                
+                if (data.recordings && data.recordings.length > 0) {
+                    document.getElementById('vnc-recordings-list').style.display = 'block';
+                    
+                    data.recordings.forEach(rec => {
+                        const tr = document.createElement('tr');
+                        tr.innerHTML = `
+                            <td style="padding: 8px; border-bottom: 1px solid #eee;">${escapeHtml(rec.sessionId)}</td>
+                            <td style="padding: 8px; border-bottom: 1px solid #eee;">${formatBytes(rec.size)}</td>
+                            <td style="padding: 8px; border-bottom: 1px solid #eee;">${new Date(rec.createdAt).toLocaleString()}</td>
+                            <td style="padding: 8px; border-bottom: 1px solid #eee;">
+                                <button class="btn btn-small" onclick="downloadFBSRecording('${escapeHtml(rec.sessionId)}')">💾 Download</button>
+                            </td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+                } else {
+                    document.getElementById('vnc-recordings-list').style.display = 'block';
+                    tbody.innerHTML = '<tr><td colspan="4" style="padding: 20px; text-align: center; color: #666;">No recordings found</td></tr>';
+                }
+                
+                showResult('vnc-playback-result', { success: true, data: { count: data.recordings?.length || 0 } });
+            } catch (error) {
+                showResult('vnc-playback-result', { success: false, error: error.message });
+            }
+        }
+        
+        function refreshRecordingsList() {
+            listVNCRecordings();
+        }
+        
+        async function downloadFBSRecording(sessionId) {
+            const port = document.getElementById('vnc-playback-port').value;
+            window.open(`http://localhost:${port}/recording/download/${encodeURIComponent(sessionId)}`, '_blank');
+        }
+        
+        // Note: FBS files are binary and need to be played with TightVNC rfbplayer
+        // The browser cannot play FBS files directly - download and use desktop player
+        
+        // VNC Server Status
+        async function fetchVNCServerStatus() {
+            const port = document.getElementById('vnc-recording-port').value;
+            
+            try {
+                const response = await fetch(`http://localhost:${port}/status`);
+                const data = await response.json();
+                showResult('vnc-server-result', { success: response.ok, data });
+            } catch (error) {
+                showResult('vnc-server-result', { success: false, error: error.message });
+            }
+        }
+        
+        async function fetchVNCClients() {
+            const port = document.getElementById('vnc-recording-port').value;
+            
+            try {
+                const response = await fetch(`http://localhost:${port}/clients`);
+                const data = await response.json();
+                showResult('vnc-server-result', { success: response.ok, data });
+            } catch (error) {
+                showResult('vnc-server-result', { success: false, error: error.message });
+            }
+        }
+        
+        async function fetchVNCClientPermissions() {
+            const port = document.getElementById('vnc-recording-port').value;
+            
+            try {
+                const response = await fetch(`http://localhost:${port}/clients/permissions`);
+                const data = await response.json();
+                showResult('vnc-server-result', { success: response.ok, data });
+            } catch (error) {
+                showResult('vnc-server-result', { success: false, error: error.message });
+            }
+        }
+        
+        // VNC API Keys
+        async function registerVNCApiKey() {
+            const port = document.getElementById('vnc-recording-port').value;
+            const apiKey = document.getElementById('vnc-api-key').value;
+            
+            if (!apiKey) {
+                alert('Please enter an API key');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`http://localhost:${port}/apiKeys/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ apiKey })
+                });
+                const data = await response.json();
+                showResult('vnc-apikey-result', { success: response.ok, data, message: 'API key registered' });
+            } catch (error) {
+                showResult('vnc-apikey-result', { success: false, error: error.message });
+            }
+        }
+        
+        async function unregisterVNCApiKey() {
+            const port = document.getElementById('vnc-recording-port').value;
+            const apiKey = document.getElementById('vnc-api-key').value;
+            
+            if (!apiKey) {
+                alert('Please enter an API key');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`http://localhost:${port}/apiKeys/${encodeURIComponent(apiKey)}`, {
+                    method: 'DELETE'
+                });
+                const data = await response.json();
+                showResult('vnc-apikey-result', { success: response.ok, data, message: 'API key unregistered' });
+            } catch (error) {
+                showResult('vnc-apikey-result', { success: false, error: error.message });
+            }
+        }
+        
+        // VNC Client Control
+        async function giveVNCControl() {
+            const port = document.getElementById('vnc-recording-port').value;
+            const clientId = document.getElementById('vnc-client-id').value;
+            
+            if (!clientId) {
+                alert('Please enter a client ID');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`http://localhost:${port}/clients/${encodeURIComponent(clientId)}/control`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                showResult('vnc-control-result', { success: response.ok, data });
+            } catch (error) {
+                showResult('vnc-control-result', { success: false, error: error.message });
+            }
+        }
+        
+        async function revokeVNCControl() {
+            const port = document.getElementById('vnc-recording-port').value;
+            const clientId = document.getElementById('vnc-client-id').value;
+            
+            if (!clientId) {
+                alert('Please enter a client ID');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`http://localhost:${port}/clients/${encodeURIComponent(clientId)}/control`, {
+                    method: 'DELETE'
+                });
+                const data = await response.json();
+                showResult('vnc-control-result', { success: response.ok, data });
+            } catch (error) {
+                showResult('vnc-control-result', { success: false, error: error.message });
+            }
+        }
+        
+        async function fetchRawData() {
+            const dataType = document.getElementById('raw-data-type').value;
+            const sessionId = document.getElementById('raw-session-id').value || currentRecordingSessionId;
+            
+            let url = `/recording/raw/${dataType}`;
+            if (sessionId) url += `?sessionId=${sessionId}`;
+            
+            const result = await apiCall('GET', url);
+            showResult('raw-data-result', result);
+        }
+        
+        async function downloadRawData() {
+            const dataType = document.getElementById('raw-data-type').value;
+            const sessionId = document.getElementById('raw-session-id').value || currentRecordingSessionId;
+            
+            let url = `/recording/raw/${dataType}`;
+            if (sessionId) url += `?sessionId=${sessionId}`;
+            
+            const result = await apiCall('GET', url);
+            
+            if (result.success) {
+                const dataStr = JSON.stringify(result.data, null, 2);
+                const blob = new Blob([dataStr], { type: 'application/json' });
+                const blobUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = blobUrl;
+                a.download = `${dataType}-${sessionId || 'all'}-${Date.now()}.json`;
+                a.click();
+                URL.revokeObjectURL(blobUrl);
+            } else {
+                showResult('raw-data-result', result);
+            }
+        }
+        
+        async function clearSessionRecordingData() {
+            const sessionId = document.getElementById('clear-session-id').value;
+            if (!sessionId) {
+                alert('Please enter a session ID to clear');
+                return;
+            }
+            
+            if (!confirm(`Are you sure you want to clear all recording data for session: ${sessionId}?`)) {
+                return;
+            }
+            
+            const result = await apiCall('DELETE', `/recording/data/${sessionId}`);
+            showResult('data-management-result', result);
+        }
+        
+        async function clearAllRecordingData() {
+            if (!confirm('⚠️ WARNING: This will delete ALL recording data from the database. This action cannot be undone. Continue?')) {
+                return;
+            }
+            
+            const result = await apiCall('DELETE', '/recording/data');
+            showResult('data-management-result', result);
+        }
+        
+        async function testLease() {
+            const leaseTime = parseInt(document.getElementById('launch-lease-time').value) || 30;
+            const result = await apiCall('POST', '/action/lease', { leaseTime });
+            showResult('management-result', result);
+        }
+        
+        async function testFree() {
+            const result = await apiCall('DELETE', '/action/free', null);
+            showResult('management-result', result);
+        }
+        
+        // Auto-show sticky VNC on load (always visible for debugging)
+        $(document).ready(() => {
+            // Show sticky VNC immediately (always visible)
+            showVNCSticky();
+            // Setup resize observer immediately
+            setupVNCResizeObserver();
+            // Try to auto-connect VNC after a short delay if host/port are set
+            setTimeout(() => {
+                const host = document.getElementById('vnc-host');
+                const port = document.getElementById('vnc-port');
+                if (host && port && host.value && port.value) {
+                    connectVNC();
+                }
+            }, 1000);
+        });
+    </script>
+</body>
 </html>

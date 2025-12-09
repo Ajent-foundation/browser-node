@@ -4,7 +4,7 @@ main() {
     run_env_setup             # Setup environment variables
     run_xvfb                  # Xvfb a virtual X server
     run_openbox               # Openbox a lightweight window manager
-    run_polybar               # Polybar a status bar
+    run_lxpanel               # LXPanel with menu/start button
 }
 
 run_xvfb() {
@@ -74,14 +74,23 @@ run_openbox() {
     echo "[PID]-${Openbox_pid}"
 }
 
-run_polybar() {
-    echo "[INFO] Starting polybar..."
-
-    polybar -c /home/user/.config/polybar/config.ini main > /dev/null 2>&1 &
-    Polybar_pid=$!
-
-    echo "[PID]-${Polybar_pid}"
+run_lxpanel() {
+    echo "[INFO] Starting lxpanel..."
+    
+    # Start lxpanel with config file (if exists) or default
+    if [ -f "/home/user/.config/lxpanel/default/config" ]; then
+        lxpanel --profile default > /dev/null 2>&1 &
+    else
+        lxpanel > /dev/null 2>&1 &
+    fi
+    Lxpanel_pid=$!
+    
+    # Wait a moment for lxpanel to start
+    sleep 1
+    
+    echo "[PID]-${Lxpanel_pid}"
 }
+
 
 main
 exit 0

@@ -67,21 +67,37 @@ change_xvfb_resolution() {
    # If xrandr fails to set the new resolution
     if ! xrandr --display :1 --size ${resolution}; then
         # Kill all X-dependent processes first
-        pkill polybar
-        pkill openbox
-        pkill Xvfb
+        pkill lxpanel 2>/dev/null
+        pkill openbox 2>/dev/null
+        pkill -9 Xvfb 2>/dev/null
         
-        # Remove the lock file
+        # Wait for processes to die
+        sleep 1
+        
+        # Force remove lock files
         rm -f /tmp/.X1-lock
         rm -f /tmp/.X11-unix/X1
+        
+        # Double check Xvfb is dead, force kill if still running
+        if pgrep Xvfb > /dev/null 2>&1; then
+            pkill -9 Xvfb 2>/dev/null
+            sleep 0.5
+        fi
         
         # Start new Xvfb with requested resolution
         Xvfb :1 -screen 0 "${resolution}x24" -dpi ${DPI} -ac +extension RANDR -nolisten tcp &
         export DISPLAY=:1
         
-        # Wait for new Xvfb to be ready
+        # Wait for new Xvfb to be ready (with timeout)
+        local timeout=10
+        local count=0
         while ! xdpyinfo -display :1 >/dev/null 2>&1; do
             sleep 0.5
+            count=$((count + 1))
+            if [ $count -ge $timeout ]; then
+                echo "[ERROR] Xvfb failed to start after ${timeout} attempts"
+                break
+            fi
         done
 
         # Restart Openbox
@@ -95,8 +111,12 @@ change_xvfb_resolution() {
         # Set wallpaper
         feh --bg-fill /home/user/wallpapers/desktop.png &
 
-        # Restart Polybar
-        polybar -c /home/user/.config/polybar/config.ini main > /dev/null 2>&1 &
+        # Restart LXPanel
+        if [ -f "/home/user/.config/lxpanel/default/config" ]; then
+            lxpanel --profile default > /dev/null 2>&1 &
+        else
+            lxpanel > /dev/null 2>&1 &
+        fi
     fi
     echo "[INFO] Resolution changed to ${resolution}."
 }
@@ -181,7 +201,7 @@ run_vnc_server() {
         echo "[INFO] The VNC server will allow interactions."
     fi
 
-    x11vnc -display :1 -rfbport 5900 -geometry $(xdpyinfo -display :1 | grep 'dimensions:' | awk '{print $2}') -noncache -forever ${passwordArgument} ${viewOnlyArgument} -q -bg & #2>/dev/null
+    x11vnc -display :1 -rfbport 5900 -geometry $(xdpyinfo -display :1 | grep 'dimensions:' | awk '{print $2}') -noncache -forever -shared ${passwordArgument} ${viewOnlyArgument} -q -bg & #2>/dev/null
     VNC_pid=$!
 
     echo "[INFO] VNC is exposed on localhost:5900"

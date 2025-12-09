@@ -117,6 +117,52 @@
     </dock>
 
     <keyboard>
+        <!-- Application Launcher (Super key or Alt+F1) -->
+        <keybind key="W-space">
+            <action name="Execute">
+                <command>rofi -show drun -theme-str 'window {width: 600;}'</command>
+            </action>
+        </keybind>
+        <keybind key="A-F1">
+            <action name="Execute">
+                <command>rofi -show drun -theme-str 'window {width: 600;}'</command>
+            </action>
+        </keybind>
+        
+        <!-- Terminal (Super+Enter) -->
+        <keybind key="W-Return">
+            <action name="Execute">
+                <command>gnome-terminal</command>
+            </action>
+        </keybind>
+        
+        <!-- File Manager (Super+E) -->
+        <keybind key="W-e">
+            <action name="Execute">
+                <command>pcmanfm</command>
+            </action>
+        </keybind>
+        
+        <!-- Screenshot (Print) -->
+        <keybind key="Print">
+            <action name="Execute">
+                <command>gnome-screenshot</command>
+            </action>
+        </keybind>
+        
+        <!-- Window Management -->
+        <keybind key="W-q">
+            <action name="Close"/>
+        </keybind>
+        <keybind key="A-F4">
+            <action name="Close"/>
+        </keybind>
+        <keybind key="W-m">
+            <action name="Iconify"/>
+        </keybind>
+        <keybind key="W-f">
+            <action name="ToggleMaximize"/>
+        </keybind>
     </keyboard>
 
     <mouse>
