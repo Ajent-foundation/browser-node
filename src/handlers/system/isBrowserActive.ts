@@ -10,15 +10,26 @@ export type RequestBody = {}
 
 export type RequestQuery = {}
 
-function getWindowID(name: string): Promise<number> {
+function getActiveWindowClass(): Promise<string> {
     return new Promise((resolve, reject) => {
-        exec(`xdotool search --name "${name}"`, (error, stdout, stderr) => {
+        // First get active window ID, then get its class via xprop
+        exec(`xdotool getactivewindow`, (error, stdout, stderr) => {
             if (error) {
-                reject(`Error: ${stderr}`);
+                reject(`Error getting active window: ${stderr}`);
                 return;
             }
-            const windowID = stdout.trim();
-            resolve(Number(windowID));
+            const windowId = stdout.trim();
+            
+            // Use xprop to get _OB_APP_CLASS (Openbox app class - reliable)
+            exec(`xprop -id ${windowId} _OB_APP_CLASS`, (error2, stdout2, stderr2) => {
+                if (error2) {
+                    reject(`Error getting window class: ${stderr2}`);
+                    return;
+                }
+                // Parse: _OB_APP_CLASS(UTF8_STRING) = "Brave-browser"
+                const match = stdout2.match(/"([^"]+)"/);
+                resolve(match ? match[1].toLowerCase() : '');
+            });
         });
     });
 }
@@ -69,17 +80,35 @@ export async function isBrowserActive(
 	}
 
     if (memory.isRunning) {
-        // get Chrome Window ID
-        // xdotool search --name "Google Chrome" 
-        const chrome = await getWindowID("Google Chrome")
-        const currentWindow = await getCurrentWindowID()
+        try {
+            // Check if active window is browser by class (more reliable than name)
+            const activeClass = await getActiveWindowClass();
+            const isBrowserActive = activeClass.includes('brave-browser') || 
+                                    activeClass.includes('chrome') || 
+                                    activeClass.includes('chromium');
+            
+            // Also get current window info for debugging
+            const currentWindow = await getCurrentWindowID();
+            const currentWindowName = await getWindowName(currentWindow);
 
-        next(
-            await buildResponse(200, {
-                isBrowserActive: chrome === currentWindow,
-                currentWindowName: await getWindowName(currentWindow)
-            })
-        )
+            next(
+                await buildResponse(200, {
+                    isBrowserActive: isBrowserActive,
+                    currentWindowClass: activeClass,
+                    currentWindowName: currentWindowName
+                })
+            )
+        } catch (error) {
+            // xdotool can fail if no window is found or display issues
+            next(
+                await buildResponse(200, {
+                    isBrowserActive: false,
+                    currentWindowClass: null,
+                    currentWindowName: null,
+                    error: String(error)
+                })
+            )
+        }
     } else {
         next(
             await buildResponse(400, {

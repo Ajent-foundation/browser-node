@@ -4,6 +4,10 @@ import { NodeMemory, CACHE, NodeCacheKeys } from "../../base/cache"
 import { gracefulShutdown } from "../../actions"
 import { exec } from 'child_process';
 import { z } from "zod"
+import { promisify } from 'util';
+import { dataCollector } from "../../services/dataCollector";
+
+const execAsync = promisify(exec);
 
 export const RequestParamsSchema = z.object({});
 
@@ -11,7 +15,10 @@ export const RequestBodySchema = z.object({
     x: z.number().optional(),
     y: z.number().optional(),
     click: z.enum(['left', 'right', 'middle']).optional(),
-    move: z.boolean().optional()
+    doubleClick: z.boolean().optional().default(false),
+    move: z.boolean().optional(),
+    action: z.enum(['mousedown', 'mouseup']).optional(),
+    button: z.enum(['left', 'right', 'middle']).optional()
 });
 
 export const RequestQuerySchema = z.object({});
@@ -41,34 +48,64 @@ export async function mouse(
 	}
 
     if (memory.isRunning) {
-        const { x, y, click, move } = req.body
-        if (move && typeof x === 'number' && typeof y === 'number') {
-            await new Promise((resolve, reject) => {
-                exec(`xdotool mousemove ${x} ${y}`, (error) => {
-                    if (error) reject(error)
-                    resolve(true)
-                })
-            })
-        }
+        try {
+            const { x, y, click, doubleClick, move, action, button } = RequestBodySchema.parse(req.body);
+            
+            // Record mouse action if data collection is enabled
+            if (memory.recordData && dataCollector.isActive()) {
+                dataCollector.recordMouse({ x, y, click, doubleClick, move, action, button });
+            }
+            
+            // Move mouse if requested
+            if (move && typeof x === 'number' && typeof y === 'number') {
+                await execAsync(`xdotool mousemove ${x} ${y}`);
+            }
 
-        if (click) {
-            const button = {
-                left: 1,
-                right: 3,
-                middle: 2
-            }[click]
+            // Handle mouse button actions (mousedown/mouseup for holding buttons)
+            if (action) {
+                const buttonMap = {
+                    left: 1,
+                    right: 3,
+                    middle: 2
+                };
+                
+                // Determine which button to use
+                // Use 'button' parameter if provided, otherwise 'click', otherwise default to left
+                const buttonName = button || click || 'left';
+                const buttonNum = buttonMap[buttonName];
+                
+                await execAsync(`xdotool ${action} ${buttonNum}`);
+            }
 
-            await new Promise((resolve, reject) => {
-                exec(`xdotool click ${button}`, (error) => {
-                    if (error) reject(error)
-                    resolve(true)
+            // Handle click (atomic click - press and release)
+            if (click && !action) {
+                const button = {
+                    left: 1,
+                    right: 3,
+                    middle: 2
+                }[click];
+
+                if (doubleClick) {
+                    // Double click: click twice with small delay
+                    await execAsync(`xdotool click ${button}`);
+                    await new Promise(resolve => setTimeout(resolve, 50)); // Small delay between clicks
+                    await execAsync(`xdotool click ${button}`);
+                } else {
+                    await execAsync(`xdotool click ${button}`);
+                }
+            }
+            
+            next(
+                await buildResponse(200, {})
+            )
+        } catch (error) {
+            next(
+                await buildResponse(400, {
+                    code: "INVALID_INPUT",
+                    message: error instanceof Error ? error.message : 'Unknown error'
                 })
-            })
+            )
         }
-        
-        next(
-            await buildResponse(200, {})
-        )
     } else {
         next(
             await buildResponse(400, {

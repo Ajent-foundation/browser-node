@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express"
 import { buildResponse } from "../../base/utility/express"
 import { NodeMemory, CACHE, NodeCacheKeys } from "../../base/cache"
 import { gracefulShutdown } from "../../actions"
+import { LOGGER } from "../../base/logger"
 import { exec } from 'child_process';
 import { readFile, unlink } from 'fs/promises';  
 import { z } from "zod"
@@ -66,7 +67,13 @@ export async function screenshot(
                 })
             );
         } catch (error) {
-            console.error(error)
+            LOGGER.error(
+                "Failed to capture screenshot",
+                {
+                    error: error instanceof Error ? error.message : 'Unknown error',
+                    stack: error instanceof Error ? error.stack : undefined
+                }
+            )
             next(
                 await buildResponse(500, {
                     code: "SCREENSHOT_FAILED",

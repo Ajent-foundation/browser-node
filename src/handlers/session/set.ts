@@ -3,14 +3,14 @@ import { buildResponse } from "../../base/utility/express"
 import { NodeMemory, CACHE, NodeCacheKeys } from "../../base/cache"
 import { gracefulShutdown } from "../../actions"
 import { BrowserStorageData, setData } from "../../actions/browser"
-import { CookieParam } from "puppeteer"
+import { Cookie } from "../../actions/browser/drivers"
 import { LOGGER } from "../../base/logger"
 import { z } from "zod"
 
 export const RequestParamsSchema = z.object({});
 
 export const RequestBodySchema = z.object({
-    cookies: z.custom<CookieParam[]>(),
+    cookies: z.custom<Cookie[]>(),
     localStorage: z.custom<BrowserStorageData>(),
     sessionStorage: z.custom<BrowserStorageData>()
 });

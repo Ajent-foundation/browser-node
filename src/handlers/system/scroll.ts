@@ -4,6 +4,7 @@ import { NodeMemory, CACHE, NodeCacheKeys } from "../../base/cache"
 import { gracefulShutdown } from "../../actions"
 import { exec } from 'child_process';
 import { z } from "zod"
+import { dataCollector } from "../../services/dataCollector";
 
 export const RequestParamsSchema = z.object({});
 
@@ -40,6 +41,12 @@ export async function scroll(
 
     if (memory.isRunning) {
         const { scrollBy, direction } = RequestBodySchema.parse(req.body)
+        
+        // Record scroll action if data collection is enabled
+        if (memory.recordData && dataCollector.isActive()) {
+            dataCollector.recordScroll({ scrollBy, direction });
+        }
+        
         const scrollDirection = direction === 'up' ? '4' : '5' // 4 for up, 5 for down
 
         // 1 Scroll = 120 px of change
