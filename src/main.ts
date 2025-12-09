@@ -1,4 +1,5 @@
 import express, { Express } from "express"
+import cors from "cors"
 import { loadEnv, setDefaults, expressVars, podVars, nodeVars } from "./base/env"
 import { getArgs } from "./base/args"
 import { NodeMemory, NodeCacheKeys, CACHE } from "./base/cache"
@@ -144,7 +145,11 @@ export const upload = multer({ dest: 'uploads/' });
         instance: null,
         startedAt: null,
         leaseTime: null,
-        pids: []
+        pids: [],
+        // Data collection
+        recordData: false,
+        sessionId: null,
+        vncVersion: "legacy"
     })
 
     // Init Express
@@ -199,6 +204,14 @@ export const upload = multer({ dest: 'uploads/' });
     })
 
     // Express-Plugins 
+    // CORS middleware - allow all origins
+    EXPRESS_APP.use(cors({
+        origin: '*',
+        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+        allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+        credentials: false
+    }))
+    
     // express.json : parses incoming requests with JSON payloads
     EXPRESS_APP.use(express.json())
 
@@ -232,6 +245,12 @@ export const upload = multer({ dest: 'uploads/' });
         "/session", 
         preRequest,
         require("./routes/session"),
+        postRequest    
+    )
+    EXPRESS_APP.use(
+        "/recording", 
+        preRequest,
+        require("./routes/recording"),
         postRequest    
     )
     EXPRESS_APP.use(

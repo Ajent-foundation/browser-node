@@ -1,4 +1,4 @@
-import { Page } from "puppeteer";
+import { IPage } from "./drivers";
 import { LOGGER } from "../../base/logger";
 
 export interface FingerprintingConfig {
@@ -541,7 +541,7 @@ export class FingerprintingProtection {
     /**
      * Apply all fingerprinting protections to a page
      */
-    async applyProtections(page: Page): Promise<void> {
+    async applyProtections(page: IPage): Promise<void> {
         try {
             await Promise.all([
                 this.spoofNavigatorObject(page),
@@ -562,7 +562,7 @@ export class FingerprintingProtection {
     /**
      * Apply protections immediately to current page (for navigation events)
      */
-    async applyProtectionsImmediate(page: Page): Promise<void> {
+    async applyProtectionsImmediate(page: IPage): Promise<void> {
         try {
             await Promise.all([
                 this.spoofNavigatorObjectImmediate(page),
@@ -583,7 +583,7 @@ export class FingerprintingProtection {
     /**
      * Spoof navigator object properties for consistency
      */
-    private async spoofNavigatorObject(page: Page): Promise<void> {
+    private async spoofNavigatorObject(page: IPage): Promise<void> {
         await page.evaluateOnNewDocument((config: FingerprintingConfig, actualUserAgent?: string) => {
             // Use the actual UserAgent that was set at browser launch, or fall back to navigator.userAgent
             const userAgent = actualUserAgent || navigator.userAgent;
@@ -849,7 +849,7 @@ export class FingerprintingProtection {
     /**
      * Spoof navigator object properties immediately (for navigation events)
      */
-    private async spoofNavigatorObjectImmediate(page: Page): Promise<void> {
+    private async spoofNavigatorObjectImmediate(page: IPage): Promise<void> {
         await page.evaluate((config: FingerprintingConfig, actualUserAgent?: string) => {
             // Use the actual UserAgent that was set at browser launch, or fall back to navigator.userAgent
             const userAgent = actualUserAgent || navigator.userAgent;
@@ -1019,7 +1019,7 @@ export class FingerprintingProtection {
     /**
      * Ensure timezone consistency across all APIs
      */
-    private async ensureTimezoneConsistency(page: Page): Promise<void> {
+    private async ensureTimezoneConsistency(page: IPage): Promise<void> {
         await page.evaluateOnNewDocument((timezone: string) => {
             // More comprehensive timezone offset mapping
             const getTimezoneOffsetMinutes = (tz: string) => {
@@ -1142,7 +1142,7 @@ export class FingerprintingProtection {
     /**
      * Ensure timezone consistency immediately (for navigation events)
      */
-    private async ensureTimezoneConsistencyImmediate(page: Page): Promise<void> {
+    private async ensureTimezoneConsistencyImmediate(page: IPage): Promise<void> {
         await page.evaluate((timezone: string) => {
             // Get the REAL current timezone offset for the given timezone
             const getTimezoneOffsetMinutes = (tz: string) => {

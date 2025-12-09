@@ -1,4 +1,3 @@
-import puppeteer, { Browser, LaunchOptions as PuppeteerLaunchOptions } from "puppeteer"
 import { createFingerprintingProtection, FingerprintingProtection } from "./fingerprinting"
 import { LOGGER } from "../../base/logger"
 import { configVars } from "../../base/env"
@@ -10,15 +9,17 @@ import path from "path"
 import axios, { isAxiosError } from "axios"
 import { execSync } from "child_process"
 import UserAgent from "user-agents"
-import { CookieParam } from "puppeteer"
 import * as fs from 'fs'
+import { getDriver, IBrowser, IPage, LaunchOptions as DriverLaunchOptions, Cookie } from "./drivers"
+import { insertNetworkRequest, updateNetworkResponse, parseCookieHeader, parseSetCookieHeaders } from "../../db/modules/dataCollection"
+import BetterSqlite3 from "better-sqlite3"
 
 export type BrowserStorageData = Record<string, object>
 
 export type BrowserData = {
     url: string
     title: string
-    cookies: CookieParam[]
+    cookies: Cookie[]
     localStorage: BrowserStorageData
     sessionStorage: BrowserStorageData
 }
@@ -37,11 +38,226 @@ export type SuccessBrowserLaunchResponse = {
     fullWsPath : string
     version    : string
     userAgent  : string
-    instance   : Browser
+    instance   : IBrowser
     pids       : number[]
 }
 
-let browser: Browser | null = null
+let browser: IBrowser | null = null
+
+// Network recording state
+let networkRecordingDb: BetterSqlite3.Database | null = null;
+let networkRecordingSessionId: string | null = null;
+
+// ==================== Network Interception ====================
+
+interface NetworkRequestData {
+    requestId: string;
+    request: {
+        url: string;
+        method: string;
+        headers: Record<string, string>;
+        postData?: string;
+    };
+    type?: string;
+}
+
+interface NetworkResponseData {
+    requestId: string;
+    response: {
+        status: number;
+        headers: Record<string, string>;
+        timing?: Record<string, number>;
+    };
+}
+
+interface NetworkFailedData {
+    requestId: string;
+    errorText: string;
+}
+
+interface CDPSessionLike {
+    send: (method: string, params?: Record<string, unknown>) => Promise<unknown>;
+    on: (event: string, callback: (params: unknown) => void) => void;
+}
+
+export async function enableNetworkRecording(dbPath: string, sessionId: string): Promise<void> {
+    try {
+        networkRecordingDb = new BetterSqlite3(dbPath);
+        networkRecordingSessionId = sessionId;
+        LOGGER.info('Network recording enabled', { dbPath, sessionId });
+        
+        // Attach network listeners to ALL existing pages
+        if (browser) {
+            const pages = await browser.pages();
+            for (const page of pages) {
+                try {
+                    await attachNetworkListeners(page);
+                    LOGGER.info('Network listeners attached to existing page', { url: page.url() });
+                } catch (error) {
+                    LOGGER.warn('Failed to attach network listeners to existing page', { error });
+                }
+            }
+        }
+    } catch (error) {
+        LOGGER.error('Failed to enable network recording', { error });
+    }
+}
+
+export function disableNetworkRecording(): void {
+    if (networkRecordingDb) {
+        networkRecordingDb.close();
+        networkRecordingDb = null;
+    }
+    networkRecordingSessionId = null;
+    LOGGER.info('Network recording disabled');
+}
+
+async function attachNetworkListeners(page: IPage): Promise<void> {
+    if (!networkRecordingDb || !networkRecordingSessionId) {
+        return;
+    }
+    
+    const db = networkRecordingDb;
+    const sessionId = networkRecordingSessionId;
+    
+    // Track requests by URL for matching with responses
+    const pendingRequests = new Map<string, { requestId: string; timestamp: number }>();
+    
+    try {
+        // Use page-level events - works for BOTH Puppeteer AND Playwright!
+        
+        // Request event - fired when request is issued
+        page.on('request', (request: unknown) => {
+            const req = request as {
+                url: () => string;
+                method: () => string;
+                headers: () => Record<string, string>;
+                postData: () => string | undefined;
+                resourceType: () => string;
+            };
+            
+            const timestamp = Date.now();
+            const url = req.url();
+            const method = req.method();
+            const headers = req.headers() || {};
+            const requestId = `${timestamp}-${Math.random().toString(36).substr(2, 9)}`;
+            
+            // Extract cookies sent with this request
+            const cookiesSent = parseCookieHeader(headers['cookie'] || headers['Cookie'], url);
+            
+            LOGGER.info('Network request captured', { url, method, cookieCount: cookiesSent.length });
+            
+            // Store for matching with response
+            pendingRequests.set(url, { requestId, timestamp });
+            
+            try {
+                insertNetworkRequest(db, {
+                    sessionId,
+                    timestamp,
+                    requestId,
+                    url,
+                    method,
+                    requestHeaders: JSON.stringify(headers),
+                    requestBody: req.postData?.() || null,
+                    responseStatus: null,
+                    responseHeaders: null,
+                    responseBody: null,
+                    resourceType: req.resourceType?.() || 'Other',
+                    timing: null,
+                    cookiesSent: cookiesSent.length > 0 ? JSON.stringify(cookiesSent) : null,
+                    cookiesSet: null
+                });
+            } catch (error) {
+                LOGGER.error('Failed to insert network request', { error, url });
+            }
+        });
+        
+        // Response event - fired when response is received
+        page.on('response', async (response: unknown) => {
+            const res = response as {
+                url: () => string;
+                status: () => number;
+                headers: () => Record<string, string>;
+                text: () => Promise<string>;
+            };
+            
+            const url = res.url();
+            const status = res.status();
+            const headers = res.headers() || {};
+            const pending = pendingRequests.get(url);
+            
+            // Extract cookies set by this response
+            const cookiesSet = parseSetCookieHeaders(headers, url);
+            
+            LOGGER.info('Network response captured', { url, status, cookiesSet: cookiesSet.length });
+            
+            if (pending) {
+                try {
+                    let responseBody: string | null = null;
+                    try {
+                        // Try to get response body (may fail for some resources)
+                        responseBody = await res.text();
+                        if (responseBody && responseBody.length > 100000) {
+                            responseBody = responseBody.substring(0, 100000) + '...[truncated]';
+                        }
+                    } catch {
+                        // Body not available (normal for redirects, images, etc.)
+                    }
+                    
+                    updateNetworkResponse(
+                        db,
+                        sessionId,
+                        pending.requestId,
+                        status,
+                        JSON.stringify(headers),
+                        responseBody,
+                        null,
+                        cookiesSet.length > 0 ? JSON.stringify(cookiesSet) : null
+                    );
+                } catch (error) {
+                    LOGGER.error('Failed to update network response', { error, url });
+                }
+                
+                pendingRequests.delete(url);
+            }
+        });
+        
+        // Request failed event
+        page.on('requestfailed', (request: unknown) => {
+            const req = request as {
+                url: () => string;
+                failure: () => { errorText: string } | null;
+            };
+            
+            const url = req.url();
+            const pending = pendingRequests.get(url);
+            
+            if (pending) {
+                const failure = req.failure?.();
+                
+                try {
+                    updateNetworkResponse(
+                        db,
+                        sessionId,
+                        pending.requestId,
+                        0,
+                        JSON.stringify({ error: failure?.errorText || 'Request failed' }),
+                        null,
+                        null
+                    );
+                } catch {
+                    // Silently ignore
+                }
+                
+                pendingRequests.delete(url);
+            }
+        });
+        
+        LOGGER.info('Network listeners attached to page', { url: page.url() });
+    } catch (error) {
+        LOGGER.error('Failed to attach network listeners', { error });
+    }
+}
 
 export async function closeBrowser() : Promise<void> {
     await freeNode()
@@ -198,11 +414,11 @@ async function runOnPreBrowserRunScript(
     })
 }
 
-function runListener() : Promise<number> {
+function runListener(targetPort: number = 9222) : Promise<number> {
     return new Promise((resolve, reject) => {
         const browserPort = process.env.NODE_BROWSER_PORT || "19222"
         LOGGER.info(
-            `[INFO] Setting up port forwarding from ${browserPort} to localhost:9222...`,
+            `[INFO] Setting up port forwarding from ${browserPort} to localhost:${targetPort}...`,
         )
         
         const httpTunnelPath = process.env.STUNNEL_HTTP === "true" ? true : false
@@ -212,7 +428,7 @@ function runListener() : Promise<number> {
                 "[INFO] running using socat",
             )
 
-            const socatProcess = spawn('socat', [`TCP4-LISTEN:${browserPort},fork,reuseaddr`, 'TCP4:localhost:9222'], {
+            const socatProcess = spawn('socat', [`TCP4-LISTEN:${browserPort},fork,reuseaddr`, `TCP4:localhost:${targetPort}`], {
                 detached: true,
                 stdio: 'ignore'
             })
@@ -280,6 +496,7 @@ export interface BrowserConfig {
         deviceMemory ?: number
         maxTouchPoints ?: number
     }
+    recordData ?: boolean // When true, browser uses port 9223 so CDP proxy can intercept on 9222
 }
 
 interface proxyInfo {
@@ -333,6 +550,10 @@ export async function launchBrowser(
     const LANGUAGE = config.language || "en-US"
     const TIMEZONE = config.timezone || "America/New_York"
     const OVERRIDE_USER_AGENT = config.overrideUserAgent || ""
+    
+    // Recording - when enabled, browser uses 9223 so CDP proxy can intercept on 9222
+    const RECORD_DATA = config.recordData || false
+    const BROWSER_DEBUG_PORT = RECORD_DATA ? 9223 : 9222
 
     try {
         // STEP 1: Validate Proxy
@@ -488,8 +709,11 @@ export async function launchBrowser(
         // Browser to use
         let appName = "google-chrome"
         
+        // Get the appropriate driver
+        const driver = getDriver(DRIVER as 'puppeteer' | 'playwright');
+
         // https://github.com/GoogleChrome/chrome-launcher/blob/main/docs/chrome-flags-for-tools.md#--enable-automation
-        const opts: PuppeteerLaunchOptions = {
+        const opts: DriverLaunchOptions = {
             executablePath: IS_LOCAL ? undefined : `/usr/bin/${appName}`,
             //userDataDir: IS_LOCAL ? undefined : '/home/user/temp',
             headless: false,
@@ -558,8 +782,8 @@ export async function launchBrowser(
                 // "--disable-web-security",
                 "--disable-component-update",
                 
-                // DevTools
-                "--remote-debugging-port=9222",
+                // DevTools - when recording, use 9223 so CDP proxy intercepts on 9222
+                `--remote-debugging-port=${BROWSER_DEBUG_PORT}`,
                 "--remote-debugging-address=0.0.0.0"
             ]
                 .concat(IS_LOCAL ? [] : [
@@ -573,27 +797,27 @@ export async function launchBrowser(
                     "--ssl-key-log-file=/home/mitmproxy/mitmproxy-ca-cert.pem"
                 ] : [])
                 .concat(extensionArgs),
-                defaultViewport: {
-                    width: Number(WINDOW_SCREEN_RESOLUTION.split("x")[0]),
-                    height: Number(WINDOW_SCREEN_RESOLUTION.split("x")[1])
-                },
-                //ignoreDefaultArgs: ['--enable-automation'],
-                ignoreDefaultArgs: [
-                    "--enable-automation",
-                    "--enable-blink-features=IdleDetection"
-                ],
+            defaultViewport: {
+                width: Number(WINDOW_SCREEN_RESOLUTION.split("x")[0]),
+                height: Number(WINDOW_SCREEN_RESOLUTION.split("x")[1])
+            },
+            ignoreDefaultArgs: [
+                "--enable-automation",
+                "--enable-blink-features=IdleDetection"
+            ],
         }
 
         LOGGER.info(
             "Launching browser",
             {
                 IS_LOCAL,
+                driver: driver.name,
                 opts
             }
         )
 
         try{
-            browser = await puppeteer.launch({...opts})
+            browser = await driver.launch(opts)
         }
         catch(error:unknown){
             if(error instanceof Error){
@@ -651,31 +875,112 @@ export async function launchBrowser(
             fingerprintingProtection = null;
         }
 
-        // Listen for new targets (pages)
-        browser.on('targetcreated', async (target) => {
-            if (target.type() === 'page') {
-                const page = await target.asPage();
-                if (page) {
-                    // Apply comprehensive fingerprinting protection
-                    if (fingerprintingProtection) {
-                        try {
-                            await fingerprintingProtection.applyProtections(page);
-                        } catch (error) {
-                            LOGGER.error("Failed to apply fingerprinting protections to new page", { error });
-                        }
-                    }
-
-                    // Set timezone consistently
-                    await page.emulateTimezone(TIMEZONE);
-
-                    const client = await page.createCDPSession()
-                    await client.send('Page.setDownloadBehavior', {
-                        behavior: 'allow',
-                        downloadPath: "/home/user/downloads"
-                    });
+        // Shared page setup function - used by both Puppeteer and Playwright
+        const setupNewPage = async (page: IPage): Promise<void> => {
+            // Wait for page to initialize
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            // Log page URL
+            try {
+                LOGGER.info('Setting up new page', { url: page.url() });
+            } catch {
+                LOGGER.info('Setting up new page', { url: 'unable to get URL' });
+            }
+            
+            // Apply fingerprinting protection
+            if (fingerprintingProtection) {
+                try {
+                    await fingerprintingProtection.applyProtections(page);
+                } catch (error) {
+                    LOGGER.error("Failed to apply fingerprinting protections", { error });
                 }
             }
-        });
+            
+            // Set timezone
+            try {
+                await page.emulateTimezone(TIMEZONE);
+            } catch (error: unknown) {
+                const err = error as { name?: string; message?: string };
+                const isTargetClosed = err?.name === 'TargetCloseError' || 
+                    err?.message?.includes('Session closed') ||
+                    err?.message?.includes('Target closed');
+                if (!isTargetClosed) {
+                    LOGGER.warn("Failed to set timezone", { error: err?.message || error });
+                }
+            }
+            
+            // Set download behavior via CDP
+            try {
+                const client = await page.createCDPSession();
+                await client.send('Page.setDownloadBehavior', {
+                    behavior: 'allow',
+                    downloadPath: "/home/user/downloads"
+                });
+            } catch (error: unknown) {
+                const err = error as { name?: string; message?: string };
+                const isTargetClosed = err?.name === 'TargetCloseError' || 
+                    err?.message?.includes('Session closed') ||
+                    err?.message?.includes('Target closed');
+                if (!isTargetClosed) {
+                    LOGGER.warn("Failed to set download behavior", { error: err?.message || error });
+                }
+            }
+            
+            // Attach network listeners for data collection
+            if (networkRecordingDb && networkRecordingSessionId) {
+                try {
+                    await attachNetworkListeners(page);
+                } catch (error) {
+                    LOGGER.error("Failed to attach network listeners", { error });
+                }
+            }
+        };
+
+        // Listen for new pages - works for both Puppeteer and Playwright
+        if (browser) {
+            if (DRIVER === 'puppeteer') {
+                // Puppeteer uses targetcreated on the underlying browser
+                const puppeteerBrowser = (browser as unknown as { browser?: { on: (event: string, handler: (target: unknown) => void) => void } }).browser;
+                if (puppeteerBrowser?.on) {
+                    puppeteerBrowser.on('targetcreated', async (target: unknown) => {
+                        try {
+                            const typedTarget = target as { 
+                                type: () => string; 
+                                page: () => Promise<unknown>;
+                                url: () => string;
+                            };
+                            
+                            LOGGER.info('Target created', { type: typedTarget.type(), url: typedTarget.url?.() || 'N/A' });
+                            
+                            if (typedTarget.type() === 'page') {
+                                const rawPage = await typedTarget.page();
+                                if (rawPage && browser) {
+                                    await setupNewPage(rawPage as IPage);
+                                }
+                            }
+                        } catch (error) {
+                            const err = error as { name?: string; message?: string };
+                            const isExpectedError = err?.message?.includes('main frame') || 
+                                err?.message?.includes('Session closed') ||
+                                err?.message?.includes('Target closed');
+                            if (!isExpectedError) {
+                                LOGGER.warn("Error in targetcreated handler", { error: err?.message || error });
+                            }
+                        }
+                    });
+                }
+            } else {
+                // Playwright uses 'page' event directly on browser
+                browser.on('page', async (page: unknown) => {
+                    try {
+                        LOGGER.info('New page created', { url: (page as IPage).url?.() || 'N/A' });
+                        await setupNewPage(page as IPage);
+                    } catch (error) {
+                        LOGGER.warn("Error in page handler", { error });
+                    }
+                });
+            }
+        }
 
         // Browser fails to launch
         if(!browser.connected){
@@ -696,10 +1001,15 @@ export async function launchBrowser(
 
         while (attempt<maxAttempts) {
             try {
-                let connection = await puppeteer.connect({ 
-                    browserWSEndpoint:browser.wsEndpoint() 
+                const wsEndpoint = browser.wsEndpoint();
+                if (!wsEndpoint) {
+                    throw new Error("Browser does not expose WebSocket endpoint");
+                }
+
+                let connection = await driver.connect({ 
+                    browserWSEndpoint: wsEndpoint
                 })
-                const wsEndpoint = connection.wsEndpoint()
+                const connectionWsEndpoint = connection.wsEndpoint()
 
                 const pages = await connection.pages()
                 if(pages.length!==0){
@@ -722,25 +1032,39 @@ export async function launchBrowser(
                     })
 
                     // Set timezone consistently
-                    await newPage.emulateTimezone(TIMEZONE);
+                    try {
+                        await newPage.emulateTimezone(TIMEZONE);
+                    } catch (error: any) {
+                        // Silently ignore timezone errors if page/target is closed
+                        const isTargetClosed = error?.name === 'TargetCloseError' || 
+                            error?.message?.includes('Session closed') ||
+                            error?.message?.includes('Target closed');
+                        if (!isTargetClosed) {
+                            LOGGER.warn("Failed to set timezone on new page", { error: error?.message || error });
+                        }
+                    }
                 }
 
-                connection.disconnect()
+                if (connection.disconnect) {
+                    await connection.disconnect();
+                }
                 LOGGER.info(
                     `Connected successfully to browser after ${attempt} attempts`,
                 )
 
                 // wsEndpoint will be in format:
                 // ws://{host}:{port}/devtools/browser/{browser-uuid}
-                const matchRes = wsEndpoint.match(/\/([a-f0-9-]+)$/)
-                if(!matchRes) {
+                const finalWsEndpoint = connectionWsEndpoint || wsEndpoint;
+                const matchRes = finalWsEndpoint.match(/\/([a-f0-9-]+)$/)
+                if(!matchRes && DRIVER !== 'playwright') {
                     throw new Error("Failed to extract browser UUID from wsEndpoint")
                 }
 
-                browserUUID = matchRes[1]
+                browserUUID = matchRes ? matchRes[1] : `playwright-${Date.now().toString(36)}`
                 connectionVerified = true
                 if(!IS_LOCAL) {
-                    pids.push(await runListener())
+                    // Forward to 9222 - if recording, CDP proxy will be on 9222 forwarding to browser on 9223
+                    pids.push(await runListener(9222))
                 }
                 break
             } catch (error:unknown) {
@@ -772,8 +1096,8 @@ export async function launchBrowser(
         }
     
         return {
-            version: await browser.version(),
-            userAgent: await browser.userAgent(),
+            version: browser.version ? await browser.version() : 'unknown',
+            userAgent: browser.userAgent ? await browser.userAgent() : userAgent,
             fullWsPath: browser.wsEndpoint(),
             uuid: browserUUID,
             instance: browser,
@@ -803,47 +1127,103 @@ export async function extractData() : Promise<BrowserData[]> {
 
     const pages = await browser.pages()
     for(const page of pages) {
-        // Get Cookies
-        const cookies = await page.cookies()
-
-        // serialize cookies
-        const serializedCookies : CookieParam[] = cookies.map(cookie => {
-            return {
-                name: cookie.name,
-                value: cookie.value,
-                domain: cookie.domain,
-                path: cookie.path,
-                expires: cookie.expires,
-                httpOnly: cookie.httpOnly,
-                secure: cookie.secure,
-                sameSite: cookie.sameSite
+        try {
+            const pageUrl = page.url()
+            
+            // Skip pages that don't allow storage access
+            if (pageUrl.startsWith('about:') || 
+                pageUrl.startsWith('chrome://') || 
+                pageUrl.startsWith('chrome-extension://') ||
+                pageUrl.startsWith('data:') ||
+                pageUrl === '') {
+                LOGGER.info('Skipping restricted page for data extraction', { url: pageUrl });
+                continue;
             }
-        })  
 
-        // Get Local Storage
-        const localStorage: BrowserStorageData = await page.evaluate(() => {
-            return localStorage
-        })
+            // Get Cookies (usually safe)
+            let serializedCookies: Cookie[] = [];
+            try {
+                const cookies = await page.cookies()
+                serializedCookies = cookies.map(cookie => ({
+                    name: cookie.name,
+                    value: cookie.value,
+                    domain: cookie.domain,
+                    path: cookie.path,
+                    expires: cookie.expires,
+                    httpOnly: cookie.httpOnly,
+                    secure: cookie.secure,
+                    sameSite: cookie.sameSite
+                }));
+            } catch (error) {
+                LOGGER.warn('Failed to get cookies from page', { url: pageUrl, error });
+            }
 
-        // Get Session Storage
-        const sessionStorage: BrowserStorageData = await page.evaluate(() => {
-            return sessionStorage
-        })
+            // Get Local Storage (can fail on restricted origins)
+            let localStorage: BrowserStorageData = {};
+            try {
+                localStorage = await page.evaluate(() => {
+                    const items: Record<string, unknown> = {};
+                    for (let i = 0; i < window.localStorage.length; i++) {
+                        const key = window.localStorage.key(i);
+                        if (key) {
+                            try {
+                                items[key] = JSON.parse(window.localStorage.getItem(key) || '');
+                            } catch {
+                                items[key] = window.localStorage.getItem(key);
+                            }
+                        }
+                    }
+                    return items;
+                });
+            } catch (error) {
+                LOGGER.warn('Failed to get localStorage from page', { url: pageUrl });
+            }
 
-        data.push({
-            url: page.url(),
-            title: await page.title(),
-            cookies: serializedCookies,
-            localStorage,
-            sessionStorage
-        })
+            // Get Session Storage (can fail on restricted origins)
+            let sessionStorage: BrowserStorageData = {};
+            try {
+                sessionStorage = await page.evaluate(() => {
+                    const items: Record<string, unknown> = {};
+                    for (let i = 0; i < window.sessionStorage.length; i++) {
+                        const key = window.sessionStorage.key(i);
+                        if (key) {
+                            try {
+                                items[key] = JSON.parse(window.sessionStorage.getItem(key) || '');
+                            } catch {
+                                items[key] = window.sessionStorage.getItem(key);
+                            }
+                        }
+                    }
+                    return items;
+                });
+            } catch (error) {
+                LOGGER.warn('Failed to get sessionStorage from page', { url: pageUrl });
+            }
+
+            let title = '';
+            try {
+                title = await page.title();
+            } catch {
+                // Ignore title errors
+            }
+
+            data.push({
+                url: pageUrl,
+                title,
+                cookies: serializedCookies,
+                localStorage,
+                sessionStorage
+            });
+        } catch (error) {
+            LOGGER.warn('Failed to extract data from page', { error });
+        }
     }
 
     return data
 }
 
 export async function setData(
-    cookies: CookieParam[],
+    cookies: Cookie[],
     localStorage: BrowserStorageData,
     sessionStorage: BrowserStorageData,
 ) : Promise<void> {
@@ -858,21 +1238,55 @@ export async function setData(
         return
     }
 
-    // Only apply to the first page
-    const page = pages[0]
+    // Find first page that allows storage access (skip restricted pages)
+    let targetPage = null;
+    for (const page of pages) {
+        const url = page.url();
+        if (!url.startsWith('about:') && 
+            !url.startsWith('chrome://') && 
+            !url.startsWith('chrome-extension://') &&
+            !url.startsWith('data:') &&
+            url !== '') {
+            targetPage = page;
+            break;
+        }
+    }
+
+    if (!targetPage) {
+        LOGGER.warn('No suitable page found for setting data');
+        return;
+    }
 
     // Set Cookies
-    await page.setCookie(...cookies)
+    try {
+        if (cookies.length > 0) {
+            await targetPage.setCookie(...cookies);
+        }
+    } catch (error) {
+        LOGGER.warn('Failed to set cookies', { error });
+    }
 
     // Set Local Storage
-    await page.evaluate((localStorage: BrowserStorageData) => {
-        localStorage = localStorage
-    }, localStorage)
+    try {
+        await targetPage.evaluate((data: BrowserStorageData) => {
+            for (const [key, value] of Object.entries(data)) {
+                window.localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
+            }
+        }, localStorage);
+    } catch (error) {
+        LOGGER.warn('Failed to set localStorage', { error });
+    }
 
     // Set Session Storage
-    await page.evaluate((sessionStorage: BrowserStorageData) => {
-        sessionStorage = sessionStorage
-    }, sessionStorage)
+    try {
+        await targetPage.evaluate((data: BrowserStorageData) => {
+            for (const [key, value] of Object.entries(data)) {
+                window.sessionStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
+            }
+        }, sessionStorage);
+    } catch (error) {
+        LOGGER.warn('Failed to set sessionStorage', { error });
+    }
 }
 
 export async function freeBrowser(): Promise<boolean> {

@@ -143,6 +143,10 @@ export async function makeSessionData(){
         LOGGER.info(
             `Copied Cookies`,
         )
+    } else {
+        LOGGER.info(
+            `Cookies file not found, skipping`,
+        )
     }
 
     // STEP-5: Compress the folder

@@ -4,11 +4,15 @@ import { NodeMemory, NodeCacheKeys, CACHE } from "../../base/cache"
 import { buildResponse } from "../../base/utility/express"
 import { SMGR_API } from "../../apis"
 import { podVars } from "../../base/env"
-import { FingerprintingProtection, ProfileManager, IPGeolocation } from '../../actions/browser/fingerprinting';
+import { FingerprintingProtection, IPGeolocation } from '../../actions/browser/fingerprinting';
 import { launchBrowser, BrowserConfig, SupportedResolution } from "../../actions/browser"
 import { gracefulShutdown } from "../../actions"
 import { scheduleTermination } from "./lease"
 import { z } from "zod"
+import { dataCollector } from "../../services/dataCollector"
+import { enableNetworkRecording } from "../../actions/browser"
+import axios from "axios"
+import { nodeVars } from "../../base/env"
 
 export const RequestParamsSchema = z.object({});
 
@@ -33,8 +37,7 @@ export const RequestBodySchema = z.object({
 	numberOfCameras: z.number().min(1).max(4).optional(),
 	numberOfMicrophones: z.number().min(1).max(4).optional(),
 	numberOfSpeakers: z.number().min(1).max(4).optional(),
-	// To be added: "playwright", "selenium"
-	driver: z.enum(["puppeteer"]).default("puppeteer").optional(),
+	driver: z.enum(["puppeteer", "playwright"]).default("puppeteer").optional(),
 	locale: z.string().optional(),
 	language: z.string().optional(),
 	timezone: z.string().optional(),
@@ -52,6 +55,8 @@ export const RequestBodySchema = z.object({
 		languages: z.array(z.string()).optional(),
 		locale: z.string().optional()
 	}).optional().default({}),
+	// Data collection flag - when true, records all actions, network, CDP, VNC
+	recordData: z.boolean().optional().default(false),
 });
 
 export const RequestQuerySchema = z.object({});
@@ -165,6 +170,7 @@ export async function launch(
 				numberOfSpeakers: req.body.numberOfSpeakers,
 				driver: req.body.driver,
 				fingerprinting: req.body.fingerprinting,
+				recordData: req.body.recordData, // Browser uses port 9223 when true, so CDP proxy can intercept on 9222
 			}
 			
 			// Screen Resolution
@@ -191,6 +197,17 @@ export async function launch(
 					mode: "rw",
 					version: "new"
 				}
+			}
+
+			// If recordData is enabled, require vncVersion to be "new" for VNC recording support
+			if (req.body.recordData && config.vnc?.version !== "new") {
+				next(
+					await buildResponse(400, {
+						code: "VNC_VERSION_REQUIRED",
+						message: "Recording requires vncVersion to be 'new'. Set vncVersion: 'new' in request body."
+					})
+				)
+				return
 			}
 
 			// Create fingerprinting protection with profile support and IP-based adjustment
@@ -271,39 +288,85 @@ export async function launch(
 					await gracefulShutdown("exit", null, true, "NODE_PARAM_UPDATE_FAILED")
 				})
 			} else {
-				LOGGER.info(
-					"Browser launched", 
-					{ browser: browserRes }
-				)
+			LOGGER.info(
+				"Browser launched", 
+				{ browser: browserRes }
+			)
 
-				// Schedule a callback to terminate the browser after the lease time
-				const now = Date.now()
-				const id = scheduleTermination(req.body.leaseTime || 10)
-				if(!id){
-					next(
-						await buildResponse(400, {
-							code: "FAILED_TO_SCHEDULE_TERMINATION",
-							message: "Failed to schedule termination"
-						})
-					)
-					return
-				}
-
-				// Update cache
-				memory.isRunning = true
-				memory.instance = browserRes.instance
-				memory.startedAt = now
-				memory.leaseTime = req.body.leaseTime
-				memory.pids = browserRes.pids
-				CACHE.set(NodeCacheKeys.MEMORY, memory)
-
+			// Schedule a callback to terminate the browser after the lease time
+			const now = Date.now()
+			const id = scheduleTermination(req.body.leaseTime || 10)
+			if(!id){
 				next(
-					await buildResponse(201, {
-						browserID: memory.browserID,
-						password: process.env.API_KEY,
-						wsPath: browserRes.uuid
+					await buildResponse(400, {
+						code: "FAILED_TO_SCHEDULE_TERMINATION",
+						message: "Failed to schedule termination"
 					})
 				)
+				return
+			}
+
+			// Initialize data collection if recordData flag is set
+			let recordingSessionId: string | null = null;
+			if (req.body.recordData) {
+				try {
+					// Use browserID as session ID - same ID used for reporting
+					recordingSessionId = memory.browserID;
+					dataCollector.initialize();
+					dataCollector.startRecording(recordingSessionId);
+					
+					// Enable network recording in browser module (attaches to existing + new pages)
+					await enableNetworkRecording(dataCollector.getDbPath(), recordingSessionId);
+					
+					// Start CDP interceptor as proxy: listens on 9222, forwards to browser on 9223
+					dataCollector.startCDPInterceptor(9222, 9223);
+					
+					// Start VNC recording via websockify API (only if new websockify is enabled)
+					if (config.vnc?.version === "new") {
+						setTimeout(async () => {
+							try {
+								const vncPort = nodeVars.getNodeVNCPort();
+								await axios.post(`http://localhost:${vncPort}/recording/start`, {
+									sessionId: recordingSessionId
+								}, { timeout: 5000 });
+								LOGGER.info("VNC recording started", { recordingSessionId });
+							} catch (vncError) {
+								LOGGER.warn("Failed to start VNC recording", { vncError });
+							}
+						}, 2000);
+					}
+					
+					LOGGER.info(
+						"Data collection initialized",
+						{ recordingSessionId }
+					)
+				} catch (error) {
+					LOGGER.error(
+						"Failed to initialize data collection",
+						{ error }
+					)
+				}
+			}
+
+			// Update cache
+			memory.isRunning = true
+			memory.instance = browserRes.instance
+			memory.startedAt = now
+			memory.leaseTime = req.body.leaseTime
+			memory.pids = browserRes.pids
+			memory.recordData = req.body.recordData || false
+			memory.sessionId = recordingSessionId
+			memory.vncVersion = config.vnc?.version || "legacy"
+			CACHE.set(NodeCacheKeys.MEMORY, memory)
+
+			next(
+				await buildResponse(201, {
+					browserID: memory.browserID,
+					password: process.env.API_KEY,
+					wsPath: browserRes.uuid,
+					recordingSessionId: recordingSessionId
+				})
+			)
 			}
 		}
 	} else {

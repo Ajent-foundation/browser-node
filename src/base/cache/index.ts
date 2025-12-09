@@ -1,4 +1,4 @@
-import { Browser } from "puppeteer"
+import { IBrowser } from "../../actions/browser/drivers"
 import NodeCache from "node-cache"
 
 export enum NodeCacheKeys {
@@ -8,10 +8,14 @@ export enum NodeCacheKeys {
 export type NodeMemory = {
     isRunning : boolean
     browserID : string
-    instance  : Browser | null
+    instance  : IBrowser | null
     startedAt : number | null
     leaseTime : number | null
     pids      : number[]
+    // Data collection flags
+    recordData : boolean
+    sessionId  : string | null
+    vncVersion : "legacy" | "new"
 }
 
 export const CACHE = new NodeCache({
