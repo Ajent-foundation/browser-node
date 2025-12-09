@@ -1,4 +1,5 @@
 import express, { Request, Response, Application } from 'express';
+import cors from 'cors';
 import { WebSocket, WebSocketServer } from 'ws';
 import http from 'http';
 import https from 'https';
@@ -7,6 +8,9 @@ import { program } from 'commander';
 import crypto from 'crypto';
 import net from 'net';
 import pino, { Logger } from 'pino';
+import fs from 'fs';
+import path from 'path';
+import zlib from 'zlib';
 
 interface ClientInfo {
     id: string;
@@ -23,6 +27,327 @@ interface VNCStatus {
     isConnected: boolean;
     lastConnectionAttempt: Date | null;
     error: string | null;
+}
+
+// VNC Recording Types
+interface VNCRecordedEvent {
+    timestamp: number;
+    type: 'frame' | 'input' | 'meta';
+    data: Buffer | VNCInputEvent | VNCMetaEvent;
+    // Frame-specific fields for video reconstruction
+    width?: number;
+    height?: number;
+    encoding?: string;
+}
+
+interface VNCInputEvent {
+    messageType: number;
+    x?: number;
+    y?: number;
+    buttonMask?: number;
+    key?: number;
+    downFlag?: boolean;
+}
+
+interface VNCMetaEvent {
+    event: string;
+    width?: number;
+    height?: number;
+    pixelFormat?: any;
+}
+
+// VNC Pixel Format type
+interface VNCPixelFormat {
+    bitsPerPixel: number;
+    depth: number;
+    bigEndianFlag: number;
+    trueColorFlag: number;
+    redMax: number;
+    greenMax: number;
+    blueMax: number;
+    redShift: number;
+    greenShift: number;
+    blueShift: number;
+}
+
+/**
+ * Simple FBS Recorder - receives VNC data from VNCManager and writes to FBS file
+ * No separate connection - just records what the proxy already receives
+ */
+class FBSRecorder {
+    private _logger: Logger;
+    private _recordingPath: string;
+    private _sessionId: string | null = null;
+    private _writer: fs.WriteStream | null = null;
+    private _buffer: Buffer = Buffer.alloc(0);
+    private _startTime: number = 0;
+    private _headerWritten: boolean = false;
+    private _maxWriteSize: number = 65535;
+    private _frameCount: number = 0;
+    private _bytesWritten: number = 0;
+    private _isRecording: boolean = false;
+    private _width: number = 0;
+    private _height: number = 0;
+    private _lastError: string | null = null;
+    
+    constructor(recordingPath: string = '/home/user/recordings') {
+        this._recordingPath = recordingPath;
+        
+        if (!fs.existsSync(recordingPath)) {
+            fs.mkdirSync(recordingPath, { recursive: true });
+        }
+        
+        const logPath = path.join(recordingPath, 'vnc-recorder.log');
+        const logStream = fs.createWriteStream(logPath, { flags: 'w' });
+        this._logger = pino({ name: 'fbs-recorder', level: 'debug' }, logStream);
+        this._logger.info({}, 'FBS Recorder initialized');
+    }
+    
+    /**
+     * Start recording with known dimensions
+     */
+    startRecording(sessionId: string, width: number, height: number): boolean {
+        if (this._isRecording) {
+            this._logger.warn({}, 'Already recording');
+            return false;
+        }
+        
+        this._sessionId = sessionId;
+        this._width = width;
+        this._height = height;
+        this._startTime = Date.now();
+        this._headerWritten = false;
+        this._buffer = Buffer.alloc(0);
+        this._frameCount = 0;
+        this._bytesWritten = 0;
+        this._lastError = null;
+        
+        const filePath = path.join(this._recordingPath, `${sessionId}.fbs`);
+        if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+        }
+        this._writer = fs.createWriteStream(filePath, { flags: 'w' });
+        this._isRecording = true;
+        
+        // Write FBS header immediately
+        this._writeHeader();
+        
+        this._logger.info({ sessionId, width, height }, 'Recording started');
+        return true;
+    }
+    
+    /**
+     * Write FBS file header
+     */
+    private _writeHeader(): void {
+        if (!this._writer || this._headerWritten) return;
+        
+        this._headerWritten = true;
+        
+        // FBS file header
+        this._writer.write('FBS 001.000\n');
+        
+        // First block: RFB init sequence
+        // RFB 3.3 version + security type + ServerInit
+        const initData: Buffer[] = [];
+        
+        // Version
+        initData.push(Buffer.from('RFB 003.003\n'));
+        
+        // Security type (None = 1)
+        const sec = Buffer.alloc(4);
+        sec.writeInt32BE(1, 0);
+        initData.push(sec);
+        
+        // ServerInit: width, height, pixel format, name
+        const fb = Buffer.alloc(4);
+        fb.writeUInt16BE(this._width, 0);
+        fb.writeUInt16BE(this._height, 2);
+        initData.push(fb);
+        
+        // Pixel format (32bpp BGRX)
+        const pf = Buffer.alloc(16);
+        pf.writeUInt8(32, 0);   // bpp
+        pf.writeUInt8(24, 1);   // depth
+        pf.writeUInt8(0, 2);    // big-endian
+        pf.writeUInt8(1, 3);    // true-color
+        pf.writeUInt16BE(255, 4);  // red-max
+        pf.writeUInt16BE(255, 6);  // green-max
+        pf.writeUInt16BE(255, 8);  // blue-max
+        pf.writeUInt8(16, 10);  // red-shift
+        pf.writeUInt8(8, 11);   // green-shift
+        pf.writeUInt8(0, 12);   // blue-shift
+        initData.push(pf);
+        
+        // Desktop name
+        const name = 'VNC Recording';
+        const nameLen = Buffer.alloc(4);
+        nameLen.writeUInt32BE(name.length, 0);
+        initData.push(nameLen);
+        initData.push(Buffer.from(name));
+        
+        // Write as first FBS block with timestamp 0
+        const block = Buffer.concat(initData);
+        this._writeBlock(block, 0);
+        
+        this._logger.info({ width: this._width, height: this._height }, 'FBS header written');
+    }
+    
+    /**
+     * Record VNC server data (called by VNCManager when it receives data from VNC server)
+     */
+    recordData(data: Buffer): void {
+        if (!this._isRecording || !this._writer) return;
+        
+        // Buffer data
+        this._buffer = Buffer.concat([this._buffer, data]);
+        
+        // Count framebuffer updates
+        if (data.length > 0 && data[0] === 0) {
+            this._frameCount++;
+        }
+        
+        // Flush if buffer is large enough
+        if (this._buffer.length >= this._maxWriteSize) {
+            this._flush();
+        }
+    }
+    
+    /**
+     * Write block to FBS file: [length(4)][data padded to 4][timestamp(4)]
+     */
+    private _writeBlock(data: Buffer, timestamp: number): void {
+        if (!this._writer) return;
+        
+        const len = data.length;
+        const paddedLen = (len + 3) & ~3;
+        const padding = paddedLen - len;
+        
+        const lenBuf = Buffer.alloc(4);
+        lenBuf.writeUInt32BE(len, 0);
+        this._writer.write(lenBuf);
+        
+        this._writer.write(data);
+        
+        if (padding > 0) {
+            this._writer.write(Buffer.alloc(padding));
+        }
+        
+        const tsBuf = Buffer.alloc(4);
+        tsBuf.writeUInt32BE(timestamp, 0);
+        this._writer.write(tsBuf);
+        
+        this._bytesWritten += 4 + paddedLen + 4;
+    }
+    
+    /**
+     * Flush buffer to disk
+     */
+    private _flush(): void {
+        if (this._buffer.length === 0) return;
+        
+        const timestamp = Date.now() - this._startTime;
+        this._writeBlock(this._buffer, timestamp);
+        this._buffer = Buffer.alloc(0);
+    }
+    
+    /**
+     * Stop recording
+     */
+    stopRecording(): { sessionId: string; frameCount: number; bytesWritten: number; duration: number; path: string } | null {
+        if (!this._isRecording || !this._sessionId) return null;
+        
+        this._flush();
+        
+        if (this._writer) {
+            this._writer.end();
+            this._writer = null;
+        }
+        
+        const duration = Date.now() - this._startTime;
+        const filePath = path.join(this._recordingPath, `${this._sessionId}.fbs`);
+        
+        const result = {
+            sessionId: this._sessionId,
+            frameCount: this._frameCount,
+            bytesWritten: this._bytesWritten,
+            duration,
+            path: filePath
+        };
+        
+        this._logger.info(result, 'Recording stopped');
+        this._isRecording = false;
+        return result;
+    }
+    
+    /**
+     * Create snapshot of current recording
+     */
+    createSnapshot(): string | null {
+        if (!this._isRecording || !this._sessionId) return null;
+        
+        this._flush();
+        
+        const sourcePath = path.join(this._recordingPath, `${this._sessionId}.fbs`);
+        const snapshotPath = path.join(this._recordingPath, `${this._sessionId}_snapshot_${Date.now()}.fbs`);
+        
+        try {
+            fs.copyFileSync(sourcePath, snapshotPath);
+            this._logger.info({ snapshotPath }, 'Snapshot created');
+            return snapshotPath;
+        } catch (err) {
+            this._logger.error({ error: err }, 'Failed to create snapshot');
+            return null;
+        }
+    }
+    
+    // Getters
+    isRecording(): boolean { return this._isRecording; }
+    getSessionId(): string | null { return this._sessionId; }
+    
+    getRecordingInfo(): {
+        sessionId: string | null;
+        frameCount: number;
+        bytesWritten: number;
+        width: number;
+        height: number;
+        isRecording: boolean;
+        duration: number;
+        lastError: string | null;
+    } {
+        return {
+            sessionId: this._sessionId,
+            frameCount: this._frameCount,
+            bytesWritten: this._bytesWritten,
+            width: this._width,
+            height: this._height,
+            isRecording: this._isRecording,
+            duration: this._isRecording ? Date.now() - this._startTime : 0,
+            lastError: this._lastError
+        };
+    }
+    
+    /**
+     * List all FBS recordings
+     */
+    listRecordings(): { sessionId: string; filename: string; size: number; createdAt: Date }[] {
+        try {
+            return fs.readdirSync(this._recordingPath)
+                .filter(f => f.endsWith('.fbs'))
+                .map(f => {
+                    const filePath = path.join(this._recordingPath, f);
+                    const stats = fs.statSync(filePath);
+                    return {
+                        sessionId: f.replace('.fbs', ''),
+                        filename: f,
+                        size: stats.size,
+                        createdAt: stats.birthtime
+                    };
+                });
+        } catch {
+            return [];
+        }
+    }
 }
 
 export class VNCManager {
@@ -76,10 +401,14 @@ export class VNCManager {
     
     // Pre-configured client permissions (for clients not yet connected)
     private _clientPermissions: Map<string, { hasControl: boolean }> = new Map();
+    
+    // FBS Recorder - records VNC data to file
+    private _recorder: FBSRecorder;
 
     constructor(
         vncHost: string, 
-        vncPort: number, 
+        vncPort: number,
+        wsPort: number = 15900,
         vncPassword?: string, 
         maxConnections: number = 10,
         preRegisteredApiKey?: string
@@ -107,6 +436,9 @@ export class VNCManager {
                 apiKey: preRegisteredApiKey
             }, "API_KEY_PRE_REGISTERED");
         }
+        
+        // Initialize FBS recorder (receives data from this proxy)
+        this._recorder = new FBSRecorder();
 
         // Express Server & Socket Server
         this._app = express();
@@ -121,6 +453,9 @@ export class VNCManager {
 
     // Initialize the express server
     private _initExpress(): void {
+        // CORS middleware
+        this._app.use(cors());
+        
         // Plugins
         this._app.use(express.json());
 
@@ -204,6 +539,303 @@ export class VNCManager {
                 hasControl: perms.hasControl
             }));
             res.status(200).json({ permissions });
+        });
+
+        // Recording API
+        // Start VNC recording
+        this._app.post('/recording/start', (req: Request, res: Response): void => {
+            const { sessionId } = req.body;
+            if (!sessionId) {
+                res.status(400).json({ code: "SESSION_ID_REQUIRED", message: "Session ID is required" });
+                return;
+            }
+            
+            // Check if already recording
+            if (this._recorder.isRecording()) {
+                res.status(400).json({ code: "ALREADY_RECORDING", message: "Already recording" });
+                return;
+            }
+            
+            // Need VNC connection for dimensions
+            if (!this._vncConnected || !this._realWidth || !this._realHeight) {
+                res.status(400).json({ code: "VNC_NOT_READY", message: "VNC server not connected" });
+                return;
+            }
+            
+            // Start recording with current dimensions
+            const success = this._recorder.startRecording(sessionId, this._realWidth, this._realHeight);
+            if (success) {
+                // Request full framebuffer to capture initial state
+                this._requestFullFramebuffer();
+                res.status(200).json({ 
+                    message: "Recording started", 
+                    sessionId,
+                    width: this._realWidth,
+                    height: this._realHeight
+                });
+            } else {
+                res.status(500).json({ 
+                    code: "RECORDING_FAILED", 
+                    message: "Failed to start recording"
+                });
+            }
+        });
+        
+        // Stop VNC recording
+        this._app.post('/recording/stop', (req: Request, res: Response): void => {
+            if (!this._recorder.isRecording()) {
+                res.status(400).json({ code: "NOT_RECORDING", message: "No active recording" });
+                return;
+            }
+            
+            const result = this._recorder.stopRecording();
+            res.status(200).json(result);
+        });
+        
+        // Get recording status
+        this._app.get('/recording/status', (req: Request, res: Response): void => {
+            const info = this._recorder.getRecordingInfo();
+            res.status(200).json({
+                isRecording: info.isRecording,
+                sessionId: info.sessionId,
+                frameCount: info.frameCount,
+                bytesWritten: info.bytesWritten,
+                width: info.width,
+                height: info.height,
+                duration: info.duration,
+                lastError: info.lastError
+            });
+        });
+        
+        // Create snapshot (save current recording without stopping)
+        this._app.post('/recording/snapshot', (req: Request, res: Response): void => {
+            if (!this._recorder.isRecording()) {
+                res.status(400).json({ code: "NOT_RECORDING", message: "No active recording" });
+                return;
+            }
+            
+            const snapshotPath = this._recorder.createSnapshot();
+            if (snapshotPath) {
+                const info = this._recorder.getRecordingInfo();
+                res.status(200).json({
+                    message: "Snapshot created",
+                    snapshotPath,
+                    sessionId: info.sessionId,
+                    frameCount: info.frameCount
+                });
+            } else {
+                res.status(500).json({ error: "Failed to create snapshot" });
+            }
+        });
+        
+        // Get recording info (live status)
+        this._app.get('/recording/live', (req: Request, res: Response): void => {
+            const info = this._recorder.getRecordingInfo();
+            res.status(200).json({
+                isRecording: info.isRecording,
+                sessionId: info.sessionId,
+                frameCount: info.frameCount,
+                bytesWritten: info.bytesWritten,
+                width: info.width,
+                height: info.height,
+                duration: info.duration
+            });
+        });
+        
+        // List all recordings (FBS files)
+        this._app.get('/recording/list', (req: Request, res: Response): void => {
+            try {
+                const recordings = this._recorder.listRecordings();
+                res.status(200).json({ recordings });
+            } catch (error) {
+                this._logger.error({ error }, 'LIST_RECORDINGS_ERROR');
+                res.status(500).json({ error: 'Failed to list recordings' });
+            }
+        });
+        
+        // Download recording file
+        this._app.get('/recording/download/:sessionId', (req: Request, res: Response): void => {
+            const sessionId = req.params.sessionId;
+            const filePath = path.join('/home/user/recordings', `${sessionId}.fbs`);
+            
+            if (!fs.existsSync(filePath)) {
+                res.status(404).json({ error: 'Recording not found' });
+                return;
+            }
+            
+            res.setHeader('Content-Type', 'application/octet-stream');
+            res.setHeader('Content-Disposition', `attachment; filename="${sessionId}.fbs"`);
+            fs.createReadStream(filePath).pipe(res);
+        });
+        
+        // LEGACY: List all recordings (keeping for compatibility)
+        this._app.get('/recording/list-legacy', (req: Request, res: Response): void => {
+            try {
+                const recordingsPath = '/home/user/recordings';
+                if (!fs.existsSync(recordingsPath)) {
+                    res.status(200).json({ recordings: [] });
+                    return;
+                }
+                
+                const files = fs.readdirSync(recordingsPath)
+                    .filter(f => f.endsWith('.fbs') || f.endsWith('.vncrec'))
+                    .map(f => {
+                        const filePath = path.join(recordingsPath, f);
+                        const stats = fs.statSync(filePath);
+                        return {
+                            sessionId: f.replace('.vncrec', ''),
+                            filename: f,
+                            size: stats.size,
+                            createdAt: stats.birthtime,
+                            modifiedAt: stats.mtime
+                        };
+                    });
+                
+                res.status(200).json({ recordings: files });
+            } catch (error) {
+                this._logger.error({ error }, 'LIST_RECORDINGS_ERROR');
+                res.status(500).json({ error: 'Failed to list recordings' });
+            }
+        });
+        
+        // Get recording frames for a session (for playback)
+        this._app.get('/recording/:sessionId/frames', (req: Request, res: Response): void => {
+            try {
+                const { sessionId } = req.params;
+                const limit = parseInt(req.query.limit as string) || 100;
+                const offset = parseInt(req.query.offset as string) || 0;
+                
+                const recordingPath = path.join('/home/user/recordings', `${sessionId}.vncrec`);
+                
+                if (!fs.existsSync(recordingPath)) {
+                    res.status(404).json({ error: 'Recording not found' });
+                    return;
+                }
+                
+                const content = fs.readFileSync(recordingPath, 'utf8');
+                const lines = content.trim().split('\n').filter(l => l);
+                const totalFrames = lines.length;
+                
+                // Extract pixel format from session_start meta event
+                let pixelFormat: VNCPixelFormat | null = null;
+                let width = 0;
+                let height = 0;
+                for (const line of lines) {
+                    try {
+                        const event = JSON.parse(line);
+                        if (event.type === 'meta' && event.data?.event === 'session_start') {
+                            if (event.data.pixelFormat) pixelFormat = event.data.pixelFormat;
+                            if (event.data.width) width = event.data.width;
+                            if (event.data.height) height = event.data.height;
+                            break;
+                        }
+                    } catch {
+                        // Skip invalid lines
+                    }
+                }
+                
+                // Parse frames with pagination
+                const frames = lines
+                    .slice(offset, offset + limit)
+                    .map((line, idx) => {
+                        try {
+                            const event = JSON.parse(line);
+                            return {
+                                index: offset + idx,
+                                timestamp: event.timestamp,
+                                type: event.type,
+                                width: event.width,
+                                height: event.height,
+                                encoding: event.encoding,
+                                // Include base64 data only for frames (already base64 in file)
+                                data: event.type === 'frame' ? event.data : undefined
+                            };
+                        } catch {
+                            return null;
+                        }
+                    })
+                    .filter(f => f !== null);
+                
+                res.status(200).json({
+                    sessionId,
+                    totalFrames,
+                    offset,
+                    limit,
+                    width,
+                    height,
+                    pixelFormat,
+                    frames
+                });
+            } catch (error) {
+                this._logger.error({ error }, 'GET_FRAMES_ERROR');
+                res.status(500).json({ error: 'Failed to get recording frames' });
+            }
+        });
+        
+        // Get recording summary
+        this._app.get('/recording/:sessionId/summary', (req: Request, res: Response): void => {
+            try {
+                const { sessionId } = req.params;
+                const recordingPath = path.join('/home/user/recordings', `${sessionId}.vncrec`);
+                
+                if (!fs.existsSync(recordingPath)) {
+                    res.status(404).json({ error: 'Recording not found' });
+                    return;
+                }
+                
+                const content = fs.readFileSync(recordingPath, 'utf8');
+                const lines = content.trim().split('\n').filter(l => l);
+                
+                let frameCount = 0;
+                let inputCount = 0;
+                let metaCount = 0;
+                let startTime: number | null = null;
+                let endTime: number | null = null;
+                let width = 0;
+                let height = 0;
+                let pixelFormat: VNCPixelFormat | null = null;
+                
+                lines.forEach(line => {
+                    try {
+                        const event = JSON.parse(line);
+                        if (!startTime || event.timestamp < startTime) startTime = event.timestamp;
+                        if (!endTime || event.timestamp > endTime) endTime = event.timestamp;
+                        
+                        if (event.type === 'frame') {
+                            frameCount++;
+                            if (event.width) width = event.width;
+                            if (event.height) height = event.height;
+                        } else if (event.type === 'input') {
+                            inputCount++;
+                        } else if (event.type === 'meta') {
+                            metaCount++;
+                            // Extract pixel format from session_start meta event
+                            if (event.data && event.data.event === 'session_start' && event.data.pixelFormat) {
+                                pixelFormat = event.data.pixelFormat;
+                            }
+                        }
+                    } catch {
+                        // Skip invalid lines
+                    }
+                });
+                
+                res.status(200).json({
+                    sessionId,
+                    totalEvents: lines.length,
+                    frameCount,
+                    inputCount,
+                    metaCount,
+                    startTime,
+                    endTime,
+                    duration: startTime && endTime ? endTime - startTime : 0,
+                    width,
+                    height,
+                    pixelFormat
+                });
+            } catch (error) {
+                this._logger.error({ error }, 'GET_SUMMARY_ERROR');
+                res.status(500).json({ error: 'Failed to get recording summary' });
+            }
         });
 
         // Control Api
@@ -382,6 +1014,11 @@ export class VNCManager {
             } else {
                 // Normal VNC protocol data - forward to all clients
                 this._broadcastToClients(data);
+                
+                // Record if active
+                if (this._recorder.isRecording()) {
+                    this._recorder.recordData(data);
+                }
             }
         });
 
@@ -706,6 +1343,7 @@ export class VNCManager {
                     if (!clientInfo.hasControl) {
                         return;
                     }
+                    
                     // Forward the entire message to VNC server
                     if (this._vncSocket) {
                         this._vncSocket.write(msg);
@@ -715,6 +1353,7 @@ export class VNCManager {
                     if (!clientInfo.hasControl) {
                         return;
                     }
+                    
                     // Forward the entire message to VNC server
                     if (this._vncSocket) {
                         this._vncSocket.write(msg);
@@ -825,6 +1464,38 @@ export class VNCManager {
     }
 
     /**
+     * Request a full (non-incremental) framebuffer update from the VNC server
+     * This is used when starting recording to capture the initial screen state
+     */
+    private _requestFullFramebuffer(): void {
+        if (!this._vncSocket || !this._vncConnected) {
+            this._logger.warn({}, 'Cannot request framebuffer - VNC not connected');
+            return;
+        }
+        
+        // FramebufferUpdateRequest message format:
+        // Byte 0: message-type (3)
+        // Byte 1: incremental (0 for full frame, 1 for incremental)
+        // Bytes 2-3: x-position (0)
+        // Bytes 4-5: y-position (0)
+        // Bytes 6-7: width
+        // Bytes 8-9: height
+        const request = Buffer.alloc(10);
+        request.writeUInt8(3, 0);  // message-type = FramebufferUpdateRequest
+        request.writeUInt8(0, 1);  // incremental = 0 (full update)
+        request.writeUInt16BE(0, 2);  // x-position = 0
+        request.writeUInt16BE(0, 4);  // y-position = 0
+        request.writeUInt16BE(this._realWidth, 6);  // width
+        request.writeUInt16BE(this._realHeight, 8);  // height
+        
+        this._vncSocket.write(request);
+        this._logger.info({ 
+            width: this._realWidth, 
+            height: this._realHeight 
+        }, 'FULL_FRAMEBUFFER_REQUESTED');
+    }
+
+    /**
      * Broadcast VNC data to all connected WebSocket clients
      */
     private _broadcastToClients(data: Buffer): void {
@@ -877,6 +1548,7 @@ const options = program.opts<IAppOptions>();
 const vncManager = new VNCManager(
     options.targetHost,
     parseInt(options.targetPort, 10),
+    parseInt(options.port, 10),
     options.password,
     parseInt(options.maxConnections, 10),
     options.apiKey

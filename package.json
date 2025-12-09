@@ -10,12 +10,15 @@
     "dev": "ts-node ./src/main.ts --debug",
     "staging": "node ./src/main.js --staging",
     "start": "node ./src/main.js",
-    "dev:poc": "docker run --rm --name browser-node-ts_10222 -e XVFB_RESOLUTION=1280x2400 -e VNC_NO_SSL=true -e STUNNEL_HTTP=true -e REPORT_STATE=false -p 7070:8080 -p 10222:19222 -p 15900:15900 browser-node-ts"
+    "dev:poc": "docker run --rm --name browser-node-ts_10222 -e XVFB_RESOLUTION=1280x2400 -e VNC_NO_SSL=true -e STUNNEL_HTTP=true -e REPORT_STATE=false -p 7070:8080 -p 10222:19222 -p 15900:15900 browser-node-ts",
+    "test:pup:goToGoogle": "ts-node ./tests/main.ts puppeteer goToGoogle",
+    "test:pw:goToGoogle": "ts-node ./tests/main.ts playwright goToGoogle"
   },
   "keywords": [],
   "dependencies": {
     "axios": "^1.9.0",
     "better-sqlite3": "^11.1.2",
+    "cors": "^2.8.5",
     "dotenv": "^16.5.0",
     "express": "^4.21.2",
     "multer": "^1.4.5-lts.2",
@@ -27,6 +30,7 @@
     "tar": "^7.4.3",
     "user-agents": "^1.1.568",
     "uuid": "^11.1.0",
+    "ws": "^8.18.0",
     "zod": "^3.25.63"
   },
   "devDependencies": {
@@ -37,6 +41,7 @@
     "@types/socket.io": "^3.0.2",
     "@types/user-agents": "^1.0.4",
     "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.5.14",
     "copyfiles": "^2.4.1",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.3"
