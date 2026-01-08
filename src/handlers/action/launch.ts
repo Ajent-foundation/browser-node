@@ -307,11 +307,11 @@ export async function launch(
 			}
 
 			// Initialize data collection if recordData flag is set
-			let recordingSessionId: string | null = null;
+			let recordingSessionId: string = "";
 			if (req.body.recordData) {
 				try {
-					// Use browserID as session ID - same ID used for reporting
-					recordingSessionId = memory.browserID;
+					// Use sessionID if provided, otherwise fall back to browserID
+					recordingSessionId = (req.body as unknown as { sessionID?: string }).sessionID || memory.browserID;
 					dataCollector.initialize();
 					dataCollector.startRecording(recordingSessionId);
 					

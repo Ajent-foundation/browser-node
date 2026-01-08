@@ -120,128 +120,255 @@ async function attachNetworkListeners(page: IPage): Promise<void> {
     const db = networkRecordingDb;
     const sessionId = networkRecordingSessionId;
     
-    // Track requests by URL for matching with responses
-    const pendingRequests = new Map<string, { requestId: string; timestamp: number }>();
+    // Track requests by requestId for matching with responses
+    const pendingRequests = new Map<string, { dbRequestId: string; timestamp: number; url: string }>();
     
     try {
-        // Use page-level events - works for BOTH Puppeteer AND Playwright!
+        // Use CDP for network events - this gives us FULL headers including cookies!
+        const cdpSession = await page.createCDPSession();
         
-        // Request event - fired when request is issued
-        page.on('request', (request: unknown) => {
-            const req = request as {
-                url: () => string;
-                method: () => string;
-                headers: () => Record<string, string>;
-                postData: () => string | undefined;
-                resourceType: () => string;
+        // Enable network domain
+        await cdpSession.send('Network.enable', {});
+        
+        // Track extra info (cookies) by requestId for merging
+        const extraInfoMap = new Map<string, { 
+            headers: Record<string, string>;
+            cookies: Array<{ name: string; value: string; domain: string }>;
+            cookieHeader: string;
+        }>();
+        
+        // CDP Network.requestWillBeSentExtraInfo - contains associatedCookies array with full cookie data!
+        cdpSession.on('Network.requestWillBeSentExtraInfo', (params: unknown) => {
+            const event = params as {
+                requestId: string;
+                headers: Record<string, string>;
+                associatedCookies?: Array<{
+                    cookie: {
+                        name: string;
+                        value: string;
+                        domain: string;
+                        path: string;
+                    };
+                    blockedReasons: string[];
+                }>;
+            };
+            
+            // Extract cookies from associatedCookies (not blocked ones)
+            const cookies: Array<{ name: string; value: string; domain: string }> = [];
+            if (event.associatedCookies) {
+                for (const ac of event.associatedCookies) {
+                    // Only include cookies that weren't blocked (empty blockedReasons)
+                    if (ac.blockedReasons.length === 0) {
+                        cookies.push({
+                            name: ac.cookie.name,
+                            value: ac.cookie.value,
+                            domain: ac.cookie.domain
+                        });
+                    }
+                }
+            }
+            
+            // Also build cookie header string from the cookies
+            const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+            
+            // Store extra info for merging with main request
+            extraInfoMap.set(event.requestId, { 
+                headers: event.headers,
+                cookies,
+                cookieHeader
+            });
+            
+            LOGGER.info('Extra info captured', { 
+                requestId: event.requestId, 
+                cookieCount: cookies.length,
+                hasCookieHeader: !!event.headers['Cookie']
+            });
+            
+            // If request already recorded, update it with cookie data
+            const pending = pendingRequests.get(event.requestId);
+            if (pending && cookies.length > 0) {
+                LOGGER.info('Updating request with cookies', { url: pending.url.substring(0, 60), cookieCount: cookies.length });
+                
+                // Merge cookies into headers for storage
+                const headersWithCookies = { ...event.headers };
+                if (cookieHeader) {
+                    headersWithCookies['Cookie'] = cookieHeader;
+                }
+                
+                // Update the request with full headers including cookies
+                try {
+                    const updateStmt = db.prepare(`
+                        UPDATE network_requests 
+                        SET requestHeaders = ?, cookiesSent = ?
+                        WHERE requestId = ? AND sessionId = ?
+                    `);
+                    updateStmt.run(
+                        JSON.stringify(headersWithCookies),
+                        JSON.stringify(cookies),
+                        pending.dbRequestId,
+                        sessionId
+                    );
+                } catch (error) {
+                    LOGGER.error('Failed to update request with cookies', { error });
+                }
+            }
+        });
+        
+        // CDP Network.requestWillBeSent - fired when request is about to be sent
+        cdpSession.on('Network.requestWillBeSent', (params: unknown) => {
+            const event = params as {
+                requestId: string;
+                request: {
+                    url: string;
+                    method: string;
+                    headers: Record<string, string>;
+                    postData?: string;
+                };
+                type?: string;
+                timestamp: number;
             };
             
             const timestamp = Date.now();
-            const url = req.url();
-            const method = req.method();
-            const headers = req.headers() || {};
-            const requestId = `${timestamp}-${Math.random().toString(36).substr(2, 9)}`;
+            const url = event.request.url;
+            const method = event.request.method;
             
-            // Extract cookies sent with this request
-            const cookiesSent = parseCookieHeader(headers['cookie'] || headers['Cookie'], url);
+            // Check if we already have extra info with cookies from requestWillBeSentExtraInfo
+            const extraInfo = extraInfoMap.get(event.requestId) as { 
+                headers: Record<string, string>; 
+                cookies: Array<{ name: string; value: string; domain: string }>;
+                cookieHeader: string;
+            } | undefined;
             
-            LOGGER.info('Network request captured', { url, method, cookieCount: cookiesSent.length });
+            // Use extra info headers if available (they include Cookie header), otherwise use request headers
+            let headers = event.request.headers || {};
+            let cookies: Array<{ name: string; value: string; domain: string }> = [];
             
-            // Store for matching with response
-            pendingRequests.set(url, { requestId, timestamp });
+            if (extraInfo) {
+                headers = extraInfo.headers || headers;
+                cookies = extraInfo.cookies || [];
+                // Ensure Cookie header is in headers for storage
+                if (extraInfo.cookieHeader && !headers['Cookie']) {
+                    headers = { ...headers, Cookie: extraInfo.cookieHeader };
+                }
+            }
+            
+            const dbRequestId = `${timestamp}-${Math.random().toString(36).substr(2, 9)}`;
+            
+            LOGGER.info('Network request captured (CDP)', { 
+                url: url.substring(0, 100), 
+                method, 
+                cookieCount: cookies.length, 
+                hasExtraInfo: !!extraInfo,
+                hasCookieHeader: !!headers['Cookie']
+            });
+            
+            // Store for matching with response using CDP requestId
+            pendingRequests.set(event.requestId, { dbRequestId, timestamp, url });
             
             try {
                 insertNetworkRequest(db, {
                     sessionId,
                     timestamp,
-                    requestId,
+                    requestId: dbRequestId,
                     url,
                     method,
                     requestHeaders: JSON.stringify(headers),
-                    requestBody: req.postData?.() || null,
+                    requestBody: event.request.postData || null,
                     responseStatus: null,
                     responseHeaders: null,
                     responseBody: null,
-                    resourceType: req.resourceType?.() || 'Other',
+                    resourceType: event.type || 'Other',
                     timing: null,
-                    cookiesSent: cookiesSent.length > 0 ? JSON.stringify(cookiesSent) : null,
+                    cookiesSent: cookies.length > 0 ? JSON.stringify(cookies) : null,
                     cookiesSet: null
                 });
             } catch (error) {
                 LOGGER.error('Failed to insert network request', { error, url });
             }
+            
+            // Clean up extra info after use
+            extraInfoMap.delete(event.requestId);
         });
         
-        // Response event - fired when response is received
-        page.on('response', async (response: unknown) => {
-            const res = response as {
-                url: () => string;
-                status: () => number;
-                headers: () => Record<string, string>;
-                text: () => Promise<string>;
+        // CDP Network.responseReceived - fired when response headers are received
+        cdpSession.on('Network.responseReceived', async (params: unknown) => {
+            const event = params as {
+                requestId: string;
+                response: {
+                    url: string;
+                    status: number;
+                    headers: Record<string, string>;
+                };
             };
             
-            const url = res.url();
-            const status = res.status();
-            const headers = res.headers() || {};
-            const pending = pendingRequests.get(url);
+            const pending = pendingRequests.get(event.requestId);
+            if (!pending) return;
+            
+            const headers = event.response.headers || {};
             
             // Extract cookies set by this response
-            const cookiesSet = parseSetCookieHeaders(headers, url);
+            const cookiesSet = parseSetCookieHeaders(headers, pending.url);
             
-            LOGGER.info('Network response captured', { url, status, cookiesSet: cookiesSet.length });
+            LOGGER.info('Network response captured (CDP)', { url: pending.url.substring(0, 100), status: event.response.status, cookiesSet: cookiesSet.length });
             
-            if (pending) {
-                try {
-                    let responseBody: string | null = null;
-                    try {
-                        // Try to get response body (may fail for some resources)
-                        responseBody = await res.text();
-                        if (responseBody && responseBody.length > 100000) {
-                            responseBody = responseBody.substring(0, 100000) + '...[truncated]';
-                        }
-                    } catch {
-                        // Body not available (normal for redirects, images, etc.)
-                    }
-                    
-                    updateNetworkResponse(
-                        db,
-                        sessionId,
-                        pending.requestId,
-                        status,
-                        JSON.stringify(headers),
-                        responseBody,
-                        null,
-                        cookiesSet.length > 0 ? JSON.stringify(cookiesSet) : null
-                    );
-                } catch (error) {
-                    LOGGER.error('Failed to update network response', { error, url });
-                }
-                
-                pendingRequests.delete(url);
-            }
+            // Store response info for later body retrieval
+            (pending as any).responseStatus = event.response.status;
+            (pending as any).responseHeaders = headers;
+            (pending as any).cookiesSet = cookiesSet;
         });
         
-        // Request failed event
-        page.on('requestfailed', (request: unknown) => {
-            const req = request as {
-                url: () => string;
-                failure: () => { errorText: string } | null;
-            };
+        // CDP Network.loadingFinished - fired when request completes (body available)
+        cdpSession.on('Network.loadingFinished', async (params: unknown) => {
+            const event = params as { requestId: string };
+            const pending = pendingRequests.get(event.requestId) as any;
+            if (!pending) return;
             
-            const url = req.url();
-            const pending = pendingRequests.get(url);
+            try {
+                let responseBody: string | null = null;
+                try {
+                    // Get response body via CDP
+                    const bodyResult = await cdpSession.send('Network.getResponseBody', { requestId: event.requestId }) as { body: string; base64Encoded: boolean };
+                    responseBody = bodyResult.base64Encoded 
+                        ? Buffer.from(bodyResult.body, 'base64').toString('utf-8')
+                        : bodyResult.body;
+                    if (responseBody && responseBody.length > 100000) {
+                        responseBody = responseBody.substring(0, 100000) + '...[truncated]';
+                    }
+                } catch {
+                    // Body not available (normal for some resources)
+                }
+                
+                updateNetworkResponse(
+                    db,
+                    sessionId,
+                    pending.dbRequestId,
+                    pending.responseStatus || 0,
+                    JSON.stringify(pending.responseHeaders || {}),
+                    responseBody,
+                    null,
+                    pending.cookiesSet?.length > 0 ? JSON.stringify(pending.cookiesSet) : null
+                );
+            } catch (error) {
+                LOGGER.error('Failed to update network response', { error, url: pending.url });
+            }
+            
+            pendingRequests.delete(event.requestId);
+        });
+        
+        // CDP Network.loadingFailed - fired when request fails
+        cdpSession.on('Network.loadingFailed', (params: unknown) => {
+            const event = params as { requestId: string; errorText: string };
+            const pending = pendingRequests.get(event.requestId);
             
             if (pending) {
-                const failure = req.failure?.();
-                
                 try {
                     updateNetworkResponse(
                         db,
                         sessionId,
-                        pending.requestId,
+                        pending.dbRequestId,
                         0,
-                        JSON.stringify({ error: failure?.errorText || 'Request failed' }),
+                        JSON.stringify({ error: event.errorText || 'Request failed' }),
+                        null,
                         null,
                         null
                     );
@@ -249,11 +376,11 @@ async function attachNetworkListeners(page: IPage): Promise<void> {
                     // Silently ignore
                 }
                 
-                pendingRequests.delete(url);
+                pendingRequests.delete(event.requestId);
             }
         });
         
-        LOGGER.info('Network listeners attached to page', { url: page.url() });
+        LOGGER.info('CDP Network listeners attached to page', { url: page.url() });
     } catch (error) {
         LOGGER.error('Failed to attach network listeners', { error });
     }

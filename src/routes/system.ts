@@ -36,7 +36,13 @@ SYSTEM_ROUTES.post(
 	selectFileFromDialog
 )
 
+// Support both GET and POST for screenshot (some callers use GET, some use POST)
 SYSTEM_ROUTES.get(
+	'/screenshot',
+	screenshot
+)
+
+SYSTEM_ROUTES.post(
 	'/screenshot',
 	screenshot
 )
