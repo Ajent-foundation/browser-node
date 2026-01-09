@@ -2,6 +2,7 @@ import { Router, NextFunction, Request, Response } from "express"
 import { buildResponse, IError } from "../base/utility/express"
 import { NodeMemory, NodeCacheKeys, CACHE } from "../base/cache"
 import { expressVars, SMGRVars, podVars, nodeVars } from "../base/env"
+import { diagnostic } from "../handlers/diagnostic"
 
 // The Routing Sheet
 const DEFAULT_ROUTES = Router()
@@ -67,5 +68,8 @@ DEFAULT_ROUTES.get(
 		next(await buildResponse(200, null))
 	}
 )
+
+// Diagnostic endpoint - helps debug connection issues (VNC, browser, ports)
+DEFAULT_ROUTES.get("/diagnostic", diagnostic)
 
 module.exports = DEFAULT_ROUTES

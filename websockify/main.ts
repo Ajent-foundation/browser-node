@@ -428,7 +428,7 @@ export class VNCManager {
         
         this._logger = pino(
             { name: 'vnc-manager', level: 'info' },
-            //pino.destination({ dest: logFile, sync: false })
+            pino.destination({ dest: logFile, sync: false })
         );
         
         // VNC Server
