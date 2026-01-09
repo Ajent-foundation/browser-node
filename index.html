@@ -212,17 +212,17 @@
         
         #screen {
             width: 100%;
-            min-height: 400px;
+            min-height: 600px;
             background: #000;
         }
         
-        /* Sticky VNC Viewer */
+        /* Sticky VNC Viewer - Large and usable */
         .vnc-sticky {
             position: fixed;
             bottom: 20px;
             right: 20px;
-            width: 400px;
-            height: 300px;
+            width: 960px;
+            height: 640px;
             background: white;
             border-radius: 8px;
             box-shadow: 0 10px 40px rgba(0,0,0,0.3);
@@ -231,10 +231,10 @@
             flex-direction: column;
             resize: both;
             overflow: hidden;
-            min-width: 300px;
-            min-height: 200px;
-            max-width: 800px;
-            max-height: 600px;
+            min-width: 640px;
+            min-height: 480px;
+            max-width: calc(100vw - 40px);
+            max-height: calc(100vh - 40px);
             border: 2px solid #0f3460;
         }
         
@@ -1087,16 +1087,36 @@
     <!-- Sticky VNC Viewer -->
     <div class="vnc-sticky" id="vnc-sticky" style="display: flex;">
         <div class="vnc-sticky-header" id="vnc-sticky-header">
-            <h4>🖥️ VNC Viewer</h4>
+            <h4>🖥️ VNC Viewer <span style="font-size: 10px; opacity: 0.7;">(F10=Max, F11=Full, ESC=Exit)</span></h4>
             <div class="vnc-sticky-controls">
+                <button id="vnc-control-btn" title="Request Control" style="background: #28a745;">🎮</button>
+                <button id="vnc-stats-btn" title="Toggle Stats (verify compression)">📊</button>
                 <button id="vnc-toggle-btn">Minimize</button>
-                <button id="vnc-maximize-btn" title="Maximize">⛶</button>
-                <button id="vnc-fullscreen-btn" title="Fullscreen">⛶⛶</button>
+                <button id="vnc-maximize-btn" title="Maximize (F10)">⛶</button>
+                <button id="vnc-fullscreen-btn" title="Fullscreen (F11)">⛶⛶</button>
                 <button id="vnc-close-btn" title="Close">✕</button>
             </div>
         </div>
         <div class="vnc-sticky-content">
             <div id="screen-sticky"></div>
+            <!-- VNC Stats Overlay -->
+            <div id="vnc-stats" style="
+                position: absolute;
+                bottom: 5px;
+                left: 5px;
+                background: rgba(0,0,0,0.8);
+                color: #0f0;
+                font-family: monospace;
+                font-size: 11px;
+                padding: 5px 8px;
+                border-radius: 4px;
+                z-index: 100;
+                display: none;
+            ">
+                <div>FPS: <span id="vnc-stat-fps">0</span></div>
+                <div>Frames: <span id="vnc-stat-frames">0</span></div>
+                <div>Data: <span id="vnc-stat-bytes">0 KB</span></div>
+            </div>
         </div>
     </div>
     
@@ -1119,7 +1139,15 @@
         let isVNCStickyMinimized = false;
         let isVNCStickyMaximized = false;
         let isVNCStickyFullscreen = false;
-        let vncStickyOriginalState = { width: '400px', height: '300px', left: '', top: '', right: '20px', bottom: '20px' };
+        let vncStickyOriginalState = { width: '960px', height: '640px', left: '', top: '', right: '20px', bottom: '20px' };
+        
+        // VNC Stats tracking
+        let vncStatsEnabled = false;
+        let vncFrameCount = 0;
+        let vncBytesReceived = 0;
+        let vncLastFpsTime = Date.now();
+        let vncLastFrameCount = 0;
+        let vncStatsInterval = null;
         
         // Tab switching
         function switchTab(tabName) {
@@ -1158,8 +1186,8 @@
             if (!isVNCStickyMaximized) {
                 // Save original state
                 vncStickyOriginalState = {
-                    width: sticky.style.width || '400px',
-                    height: sticky.style.height || '300px',
+                    width: sticky.style.width || '960px',
+                    height: sticky.style.height || '640px',
                     left: sticky.style.left || '',
                     top: sticky.style.top || '',
                     right: sticky.style.right || '20px',
@@ -1265,10 +1293,27 @@
             setTimeout(() => resizeVNCSticky(), 200);
         }
         
-        // Handle ESC key to exit fullscreen
+        // Handle keyboard shortcuts for VNC
         document.addEventListener('keydown', (e) => {
+            // ESC - exit fullscreen
             if (e.key === 'Escape' && isVNCStickyFullscreen) {
                 exitFullscreenVNCSticky();
+            }
+            // F11 - toggle fullscreen (only if VNC viewer is visible)
+            if (e.key === 'F11') {
+                const sticky = document.getElementById('vnc-sticky');
+                if (sticky && sticky.style.display !== 'none') {
+                    e.preventDefault();
+                    fullscreenVNCSticky();
+                }
+            }
+            // F10 - toggle maximize
+            if (e.key === 'F10') {
+                const sticky = document.getElementById('vnc-sticky');
+                if (sticky && sticky.style.display !== 'none') {
+                    e.preventDefault();
+                    maximizeVNCSticky();
+                }
             }
         });
         
@@ -1395,11 +1440,19 @@
             }
             
             // Ensure buttons work properly - use event listeners instead of onclick
+            const controlBtn = document.getElementById('vnc-control-btn');
             const maximizeBtn = document.getElementById('vnc-maximize-btn');
             const fullscreenBtn = document.getElementById('vnc-fullscreen-btn');
             const toggleBtn = document.getElementById('vnc-toggle-btn');
             const closeBtn = document.getElementById('vnc-close-btn');
             
+            if (controlBtn) {
+                controlBtn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    await requestVNCControl();
+                });
+            }
             if (maximizeBtn) {
                 maximizeBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
@@ -1428,6 +1481,16 @@
                     closeVNCSticky();
                 });
             }
+            
+            // Stats button
+            const statsBtn = document.getElementById('vnc-stats-btn');
+            if (statsBtn) {
+                statsBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    toggleVNCStats();
+                });
+            }
         });
         
         document.addEventListener('mousemove', (e) => {
@@ -1444,6 +1507,108 @@
         document.addEventListener('mouseup', () => {
             isDragging = false;
         });
+        
+        // Toggle VNC stats display
+        function toggleVNCStats() {
+            vncStatsEnabled = !vncStatsEnabled;
+            const statsDiv = document.getElementById('vnc-stats');
+            const statsBtn = document.getElementById('vnc-stats-btn');
+            
+            if (vncStatsEnabled) {
+                statsDiv.style.display = 'block';
+                statsBtn.style.background = '#007bff';
+                startVNCStatsTracking();
+            } else {
+                statsDiv.style.display = 'none';
+                statsBtn.style.background = '';
+                stopVNCStatsTracking();
+            }
+        }
+        
+        // Start tracking VNC stats
+        function startVNCStatsTracking() {
+            if (vncStatsInterval) return;
+            
+            vncLastFpsTime = Date.now();
+            vncLastFrameCount = vncFrameCount;
+            
+            vncStatsInterval = setInterval(() => {
+                const now = Date.now();
+                const elapsed = (now - vncLastFpsTime) / 1000;
+                const frames = vncFrameCount - vncLastFrameCount;
+                const fps = Math.round(frames / elapsed);
+                
+                document.getElementById('vnc-stat-fps').textContent = fps;
+                document.getElementById('vnc-stat-frames').textContent = vncFrameCount;
+                document.getElementById('vnc-stat-bytes').textContent = formatBytes(vncBytesReceived);
+                
+                vncLastFpsTime = now;
+                vncLastFrameCount = vncFrameCount;
+            }, 1000);
+        }
+        
+        // Stop tracking VNC stats
+        function stopVNCStatsTracking() {
+            if (vncStatsInterval) {
+                clearInterval(vncStatsInterval);
+                vncStatsInterval = null;
+            }
+        }
+        
+        // Format bytes to human readable
+        function formatBytes(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+        }
+        
+        // Request control of the VNC session
+        async function requestVNCControl() {
+            const host = document.getElementById('vnc-host').value;
+            const port = document.getElementById('vnc-port').value;
+            const clientId = document.getElementById('vnc-connect-clientid').value;
+            
+            if (!clientId) {
+                alert('No client ID found. Connect to VNC first.');
+                return;
+            }
+            
+            const controlBtn = document.getElementById('vnc-control-btn');
+            const originalText = controlBtn.textContent;
+            controlBtn.textContent = '⏳';
+            
+            try {
+                const response = await fetch(`http://${host}:${port}/clients/${encodeURIComponent(clientId)}/control`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                if (response.ok) {
+                    controlBtn.textContent = '✅';
+                    controlBtn.style.background = '#28a745';
+                    controlBtn.title = 'Control Active!';
+                    console.log('VNC control granted for client:', clientId);
+                } else {
+                    const error = await response.json();
+                    controlBtn.textContent = '❌';
+                    controlBtn.style.background = '#dc3545';
+                    console.error('Failed to get control:', error);
+                    alert('Failed to get control: ' + (error.message || response.statusText));
+                }
+            } catch (err) {
+                controlBtn.textContent = '❌';
+                controlBtn.style.background = '#dc3545';
+                console.error('Error requesting control:', err);
+                alert('Error requesting control: ' + err.message);
+            }
+            
+            // Reset button after 3 seconds
+            setTimeout(() => {
+                controlBtn.textContent = '🎮';
+                controlBtn.style.background = '#28a745';
+                controlBtn.title = 'Request Control';
+            }, 3000);
+        }
         
         // VNC API Key Functions for Connect Section
         async function registerVNCApiKeyForConnect() {
@@ -1584,15 +1749,42 @@
                 rfbSticky.disconnect();
             }
             
+            // Reset stats on new connection
+            vncFrameCount = 0;
+            vncBytesReceived = 0;
+            
             rfbSticky = new RFB(document.getElementById('screen-sticky'), vncUrl);
             rfbSticky.viewOnly = false;
             rfbSticky.scaleViewport = true;
             
+            // Track frames via the 'fbu' (framebuffer update) event if available
+            // or use a PerformanceObserver for network stats
             rfbSticky.addEventListener('connect', () => {
                 vncConnected = true;
                 updateVNCStatus(true);
-                // Don't resize immediately - let RFB initialize and display first
-                // RFB will handle initial sizing automatically with scaleViewport
+                console.log('[VNC] Connected - stats tracking active');
+                
+                // Try to access internal WebSocket for stats
+                try {
+                    const sock = rfbSticky._sock;
+                    if (sock && sock._websocket) {
+                        const ws = sock._websocket;
+                        const originalOnMessage = ws.onmessage;
+                        ws.onmessage = function(event) {
+                            if (event.data instanceof ArrayBuffer) {
+                                vncBytesReceived += event.data.byteLength;
+                                vncFrameCount++;
+                            } else if (event.data instanceof Blob) {
+                                vncBytesReceived += event.data.size;
+                                vncFrameCount++;
+                            }
+                            if (originalOnMessage) originalOnMessage.call(ws, event);
+                        };
+                        console.log('[VNC] Stats tracking hooked successfully');
+                    }
+                } catch (err) {
+                    console.log('[VNC] Could not hook stats:', err);
+                }
             });
             
             rfbSticky.addEventListener('disconnect', () => {

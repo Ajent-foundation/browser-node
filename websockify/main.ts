@@ -404,6 +404,12 @@ export class VNCManager {
     
     // FBS Recorder - records VNC data to file
     private _recorder: FBSRecorder;
+     
+    // Track if we've sent encodings to VNC server
+    private _encodingsSentToVnc: boolean = false;
+    
+    // Track last encoding log time (to avoid spam)
+    private _lastEncodingLog: number = 0;
 
     constructor(
         vncHost: string, 
@@ -413,10 +419,17 @@ export class VNCManager {
         maxConnections: number = 10,
         preRegisteredApiKey?: string
     ) {
-        this._logger = pino({
-            name: 'vnc-manager',
-            level: 'info'
-        });
+        // Log to file with pino
+        const logFile = '/home/user/logs/websockify.log';
+        const logDir = path.dirname(logFile);
+        if (!fs.existsSync(logDir)) {
+            fs.mkdirSync(logDir, { recursive: true });
+        }
+        
+        this._logger = pino(
+            { name: 'vnc-manager', level: 'info' },
+            //pino.destination({ dest: logFile, sync: false })
+        );
         
         // VNC Server
         this._host = vncHost;
@@ -1011,9 +1024,35 @@ export class VNCManager {
                     pixelFormat: this._realPixelFormat,
                     serverName: serverName
                 }, "VNC_HANDSHAKE_COMPLETE");
+                
+                // Send our supported encodings to x11vnc to enable compression
+                // Without this, x11vnc defaults to Raw encoding (very slow)
+                this._sendEncodingsToVnc();
             } else {
                 // Normal VNC protocol data - forward to all clients
                 this._broadcastToClients(data);
+                
+                // Log encoding info for first few framebuffer updates (to verify compression)
+                if (data.length > 0 && data[0] === 0) { // FramebufferUpdate message
+                    const numRects = data.readUInt16BE(2);
+                    if (numRects > 0 && data.length >= 16) {
+                        // Parse first rectangle header (starts at byte 4)
+                        // Format: x(2), y(2), width(2), height(2), encoding(4)
+                        const encoding = data.readInt32BE(12);
+                        const encodingName = this._getEncodingName(encoding);
+                        
+                        // Log periodically (not every frame)
+                        if (!this._lastEncodingLog || Date.now() - this._lastEncodingLog > 5000) {
+                            this._logger.info({
+                                numRects,
+                                encoding,
+                                encodingName,
+                                dataSize: data.length
+                            }, "VNC_FRAME_ENCODING");
+                            this._lastEncodingLog = Date.now();
+                        }
+                    }
+                }
                 
                 // Record if active
                 if (this._recorder.isRecording()) {
@@ -1299,31 +1338,38 @@ export class VNCManager {
                 // Handle VNC protocol messages
                 const messageType = msg[0];
 
-                // Handle SetPixelFormat (type 0) [IGNORED]
+                // Handle SetPixelFormat (type 0) - Forward to VNC server
                 if (messageType === 0) {
-                    // Acknowledge the pixel format
-                    const response = Buffer.from([0, 0, 0, 0]);
-                    ws.send(response);
+                    // Forward pixel format to VNC server so it knows client's preference
+                    if (this._vncSocket && this._vncConnected) {
+                        this._vncSocket.write(msg);
+                        this._logger.debug({ 
+                            clientId,
+                            msgLength: msg.length 
+                        }, "SET_PIXEL_FORMAT_FORWARDED");
+                    }
                     return;
                 }
 
-                // Handle SetEncodings (type 2) [IGNORED]
+                // Handle SetEncodings (type 2) - Forward to VNC server
+                // This is critical for performance! Without this, x11vnc uses Raw encoding
                 if (messageType === 2) {
-                    // Parse the encodings from the message
+                    // Parse the encodings for logging
                     const numEncodings = msg.readUInt16BE(2);
-                    
-                    // Read each encoding
+                    const encodings: number[] = [];
                     for (let i = 0; i < numEncodings; i++) {
-                        const encoding = msg.readInt32BE(4 + (i * 4));
-                        // Special encodings are negative numbers
-                        if (encoding < 0) {
-                        } else {
-                        }
+                        encodings.push(msg.readInt32BE(4 + (i * 4)));
                     }
                     
-                    // Acknowledge the encodings
-                    const response = Buffer.from([0, 0, 0, 0]);
-                    ws.send(response);
+                    // Forward to VNC server so it uses efficient encodings (Tight, ZRLE, etc.)
+                    if (this._vncSocket && this._vncConnected) {
+                        this._vncSocket.write(msg);
+                        this._logger.info({ 
+                            clientId,
+                            numEncodings,
+                            encodings: encodings.slice(0, 10) // Log first 10 for debugging
+                        }, "SET_ENCODINGS_FORWARDED");
+                    }
                     return;
                 }
 
@@ -1493,6 +1539,88 @@ export class VNCManager {
             width: this._realWidth, 
             height: this._realHeight 
         }, 'FULL_FRAMEBUFFER_REQUESTED');
+    }
+
+    /**
+     * Send SetEncodings message to VNC server to enable efficient compression
+     * This tells x11vnc what encodings we support (Tight, ZRLE, Hextile, etc.)
+     * Without this, x11vnc defaults to Raw encoding which is very slow
+     */
+    private _sendEncodingsToVnc(): void {
+        if (!this._vncSocket || !this._vncConnected) {
+            this._logger.warn({}, 'Cannot send encodings - VNC not connected');
+            return;
+        }
+        
+        if (this._encodingsSentToVnc) {
+            return; // Already sent
+        }
+        
+        // VNC encoding types (in order of preference)
+        const encodings = [
+            16,     // ZRLE - efficient compression
+            7,      // Tight - good compression with quality levels
+            6,      // zlib - compressed
+            5,      // Hextile - reasonable compression
+            2,      // RRE - run-length encoding
+            1,      // CopyRect - efficient for scrolling
+            0,      // Raw - fallback (no compression)
+            // Pseudo-encodings
+            -223,   // DesktopSize
+            -224,   // LastRect
+            -239,   // Cursor
+            -32,    // Compression level (0 = -256, 9 = -247) - we use level 6
+            -250,   // Compression level 6
+            -23,    // Quality level (0 = -32, 9 = -23) - we use level 9 (best)
+        ];
+        
+        // SetEncodings message format:
+        // Byte 0: message-type (2)
+        // Byte 1: padding
+        // Bytes 2-3: number-of-encodings
+        // Then 4 bytes per encoding (signed 32-bit big-endian)
+        const msgLength = 4 + (encodings.length * 4);
+        const msg = Buffer.alloc(msgLength);
+        
+        msg.writeUInt8(2, 0);  // message-type = SetEncodings
+        msg.writeUInt8(0, 1);  // padding
+        msg.writeUInt16BE(encodings.length, 2);  // number-of-encodings
+        
+        // Write each encoding
+        for (let i = 0; i < encodings.length; i++) {
+            msg.writeInt32BE(encodings[i], 4 + (i * 4));
+        }
+        
+        this._vncSocket.write(msg);
+        this._encodingsSentToVnc = true;
+        
+        this._logger.info({ 
+            encodings,
+            encodingCount: encodings.length
+        }, 'ENCODINGS_SENT_TO_VNC');
+    }
+
+    /**
+     * Get human-readable name for VNC encoding type
+     */
+    private _getEncodingName(encoding: number): string {
+        switch (encoding) {
+            case 0: return 'Raw';
+            case 1: return 'CopyRect';
+            case 2: return 'RRE';
+            case 4: return 'CoRRE';
+            case 5: return 'Hextile';
+            case 6: return 'zlib';
+            case 7: return 'Tight';
+            case 8: return 'zlibhex';
+            case 16: return 'ZRLE';
+            case 17: return 'ZYWRLE';
+            case -223: return 'DesktopSize';
+            case -224: return 'LastRect';
+            case -239: return 'Cursor';
+            case -240: return 'XCursor';
+            default: return `Unknown(${encoding})`;
+        }
     }
 
     /**
