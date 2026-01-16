@@ -21,6 +21,7 @@ interface ClientInfo {
     protocolVersion: string | null;
     securityType: number | null;
     authenticated: boolean;
+    hasReceivedEncodings: boolean;
 }
 
 interface VNCStatus {
@@ -393,6 +394,10 @@ export class VNCManager {
     // Store VNC handshake data for new clients
     private _vncHandshakeData: Buffer[] = [];
     private _isHandshakeComplete: boolean = false;
+    
+    // Store ALL VNC messages since websockify connected to x11vnc
+    // New clients replay this entire history to rebuild zlib state
+    private _vncMessageHistory: Buffer[] = [];
 
     // Clients, Controller, API KEYS
     private _registeredApiKeys: Set<string> = new Set();
@@ -854,39 +859,49 @@ export class VNCManager {
         // Control Api
         // Assign control to a client (works for connected and disconnected clients)
         this._app.post('/clients/:clientId/control', (req: Request, res: Response): void => {
-            const { clientId } = req.params;
-            
-            // Find connected client by clientId
-            const clientEntry = Array.from(this._clients.entries()).find(([_, client]) => client.id === clientId);
-            
-            if (clientEntry) {
-                // Client is connected - assign control immediately
-                this.assignControl(clientEntry[0]);
-                res.status(200).json({ message: "Control assigned to connected client" });
-            } else {
-                // Client is not connected - store permission for when they connect
-                this._clientPermissions.set(clientId, { hasControl: true });
-                res.status(200).json({ message: "Control permission set for disconnected client" });
+            try {
+                const { clientId } = req.params;
+                
+                // _clients is Map<string, ClientInfo> keyed by clientId
+                const client = this._clients.get(clientId);
+                
+                if (client) {
+                    // Client is connected - assign control immediately
+                    this.assignControl(clientId);
+                    res.status(200).json({ message: "Control assigned to connected client" });
+                } else {
+                    // Client is not connected - store permission for when they connect
+                    this._clientPermissions.set(clientId, { hasControl: true });
+                    res.status(200).json({ message: "Control permission set for disconnected client" });
+                }
+            } catch (error) {
+                this._logger.error({ error }, 'CONTROL_ENDPOINT_ERROR');
+                res.status(500).json({ code: "INTERNAL_ERROR", message: String(error) });
             }
         });
 
         // Release control from a client (works for connected and disconnected clients)
         this._app.delete('/clients/:clientId/control', (req: Request, res: Response): void => {
-            const { clientId } = req.params;
-            
-            // Find connected client by clientId
-            const clientEntry = Array.from(this._clients.entries()).find(([_, client]) => client.id === clientId);
-            
-            if (clientEntry) {
-                // Client is connected - release control immediately
-                this.releaseControl(clientEntry[0]);
-                res.status(200).json({ message: "Control released from connected client" });
-            } else if (this._clientPermissions.has(clientId)) {
-                // Client is not connected but has pre-configured permissions - remove them
-                this._clientPermissions.delete(clientId);
-                res.status(200).json({ message: "Control permission removed for disconnected client" });
-            } else {
-                res.status(404).json({ code: "CLIENT_NOT_FOUND", message: "Client not found" });
+            try {
+                const { clientId } = req.params;
+                
+                // _clients is Map<string, ClientInfo> keyed by clientId
+                const client = this._clients.get(clientId);
+                
+                if (client) {
+                    // Client is connected - release control immediately
+                    this.releaseControl(clientId);
+                    res.status(200).json({ message: "Control released from connected client" });
+                } else if (this._clientPermissions.has(clientId)) {
+                    // Client is not connected but has pre-configured permissions - remove them
+                    this._clientPermissions.delete(clientId);
+                    res.status(200).json({ message: "Control permission removed for disconnected client" });
+                } else {
+                    res.status(404).json({ code: "CLIENT_NOT_FOUND", message: "Client not found" });
+                }
+            } catch (error) {
+                this._logger.error({ error }, 'RELEASE_CONTROL_ENDPOINT_ERROR');
+                res.status(500).json({ code: "INTERNAL_ERROR", message: String(error) });
             }
         });
     }
@@ -1029,30 +1044,12 @@ export class VNCManager {
                 // Without this, x11vnc defaults to Raw encoding (very slow)
                 this._sendEncodingsToVnc();
             } else {
-                // Normal VNC protocol data - forward to all clients
-                this._broadcastToClients(data);
+                // Normal VNC protocol data
+                // Store in history for replaying to new clients
+                this._vncMessageHistory.push(data);
                 
-                // Log encoding info for first few framebuffer updates (to verify compression)
-                if (data.length > 0 && data[0] === 0) { // FramebufferUpdate message
-                    const numRects = data.readUInt16BE(2);
-                    if (numRects > 0 && data.length >= 16) {
-                        // Parse first rectangle header (starts at byte 4)
-                        // Format: x(2), y(2), width(2), height(2), encoding(4)
-                        const encoding = data.readInt32BE(12);
-                        const encodingName = this._getEncodingName(encoding);
-                        
-                        // Log periodically (not every frame)
-                        if (!this._lastEncodingLog || Date.now() - this._lastEncodingLog > 5000) {
-                            this._logger.info({
-                                numRects,
-                                encoding,
-                                encodingName,
-                                dataSize: data.length
-                            }, "VNC_FRAME_ENCODING");
-                            this._lastEncodingLog = Date.now();
-                        }
-                    }
-                }
+                // Forward to all connected clients
+                this._broadcastToClients(data);
                 
                 // Record if active
                 if (this._recorder.isRecording()) {
@@ -1142,7 +1139,8 @@ export class VNCManager {
                 hasControl: hasControl,
                 protocolVersion: null,
                 securityType: null,
-                authenticated: false
+                authenticated: false,
+                hasReceivedEncodings: false
             };
             this._clients.set(clientId, clientInfo);
             
@@ -1329,8 +1327,32 @@ export class VNCManager {
                             clientId: clientId,
                             width: this._realWidth,
                             height: this._realHeight,
-                            serverName: realServerName
+                            serverName: realServerName,
+                            historyMessages: this._vncMessageHistory.length
                         }, "CLIENT_AUTHENTICATED");
+                        
+                        // Replay entire VNC message history to new client
+                        // This rebuilds the zlib compression state correctly
+                        if (this._vncMessageHistory.length > 0) {
+                            this._logger.info({
+                                clientId,
+                                messageCount: this._vncMessageHistory.length
+                            }, "REPLAYING_VNC_HISTORY");
+                            
+                            for (const msg of this._vncMessageHistory) {
+                                try {
+                                    ws.send(msg);
+                                } catch (error) {
+                                    this._logger.error({
+                                        clientId,
+                                        error
+                                    }, "FAILED_TO_REPLAY_MESSAGE");
+                                    break;
+                                }
+                            }
+                            
+                            this._logger.info({ clientId }, "VNC_HISTORY_REPLAY_COMPLETE");
+                        }
                     }
                     return;
                 }
@@ -1351,31 +1373,32 @@ export class VNCManager {
                     return;
                 }
 
-                // Handle SetEncodings (type 2) - Forward to VNC server
-                // This is critical for performance! Without this, x11vnc uses Raw encoding
+                // Handle SetEncodings (type 2) - DO NOT forward to x11vnc!
+                // Websockify already set encodings with x11vnc at startup
+                // Client preferences are irrelevant - websockify is the server to x11vnc
                 if (messageType === 2) {
-                    // Parse the encodings for logging
+                    // Parse the encodings for logging only
                     const numEncodings = msg.readUInt16BE(2);
                     const encodings: number[] = [];
                     for (let i = 0; i < numEncodings; i++) {
                         encodings.push(msg.readInt32BE(4 + (i * 4)));
                     }
                     
-                    // Forward to VNC server so it uses efficient encodings (Tight, ZRLE, etc.)
-                    if (this._vncSocket && this._vncConnected) {
-                        this._vncSocket.write(msg);
-                        this._logger.info({ 
-                            clientId,
-                            numEncodings,
-                            encodings: encodings.slice(0, 10) // Log first 10 for debugging
-                        }, "SET_ENCODINGS_FORWARDED");
-                    }
+                    // Log client encodings but DON'T forward - x11vnc uses websockify's encodings
+                    this._logger.info({ 
+                        clientId,
+                        numEncodings,
+                        encodings: encodings.slice(0, 10)
+                    }, "CLIENT_ENCODINGS_IGNORED");
+                    
+                    // Mark that this client has sent encodings
+                    clientInfo.hasReceivedEncodings = true;
                     return;
                 }
 
                 // Handle FramebufferUpdateRequest (type 3)
+                // Forward to x11vnc as-is
                 if (messageType === 3) {
-                    // Forward the framebuffer update request to VNC server
                     if (this._vncSocket) {
                         this._vncSocket.write(msg);
                     }
@@ -1557,6 +1580,7 @@ export class VNCManager {
         }
         
         // VNC encoding types (in order of preference)
+        // We replay entire message history to new clients, so stateful compression is fine
         const encodings = [
             16,     // ZRLE - efficient compression
             7,      // Tight - good compression with quality levels
