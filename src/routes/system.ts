@@ -13,6 +13,7 @@ import { clipboardSet } from "../handlers/system/clipboardSet"
 import { shellCommand } from "../handlers/system/shellCommand"
 import { screenSize } from "../handlers/system/screenSize"
 import { drag } from "../handlers/system/drag"
+import { path } from "../handlers/system/path"
 import { keyboardState } from "../handlers/system/keyboardState"
 import { mouseState } from "../handlers/system/mouseState"
 import { windows } from "../handlers/system/windows"
@@ -90,6 +91,11 @@ SYSTEM_ROUTES.get(
 SYSTEM_ROUTES.post(
 	'/drag',
 	drag
+)
+
+SYSTEM_ROUTES.post(
+	'/path',
+	path
 )
 
 SYSTEM_ROUTES.get(

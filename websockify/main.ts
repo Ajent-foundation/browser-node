@@ -1592,7 +1592,8 @@ export class VNCManager {
             // Pseudo-encodings
             -223,   // DesktopSize
             -224,   // LastRect
-            -239,   // Cursor
+            -239,   // Cursor (rich cursor - includes cursor image)
+            -240,   // XCursor (fallback for older VNC servers)
             -32,    // Compression level (0 = -256, 9 = -247) - we use level 6
             -250,   // Compression level 6
             -23,    // Quality level (0 = -32, 9 = -23) - we use level 9 (best)

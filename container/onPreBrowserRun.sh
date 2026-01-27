@@ -201,7 +201,9 @@ run_vnc_server() {
         echo "[INFO] The VNC server will allow interactions."
     fi
 
-    x11vnc -display :1 -rfbport 5900 -geometry $(xdpyinfo -display :1 | grep 'dimensions:' | awk '{print $2}') -noncache -forever -shared ${passwordArgument} ${viewOnlyArgument} -q -bg & #2>/dev/null
+    # -cursor: Share cursor shape with VNC clients (makes cursor visible)
+    # -xfixes: Use XFIXES extension for cursor tracking (more efficient)
+    x11vnc -display :1 -rfbport 5900 -geometry $(xdpyinfo -display :1 | grep 'dimensions:' | awk '{print $2}') -noncache -forever -shared -cursor -xfixes ${passwordArgument} ${viewOnlyArgument} -q -bg & #2>/dev/null
     VNC_pid=$!
 
     echo "[INFO] VNC is exposed on localhost:5900"

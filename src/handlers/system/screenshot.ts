@@ -13,7 +13,9 @@ export const RequestBodySchema = z.object({
     quality: z.number().optional()
 });
 
-export const RequestQuerySchema = z.object({});
+export const RequestQuerySchema = z.object({
+    quality: z.string().optional() // Accept quality as query param (from scraper-service)
+});
 
 export type RequestParams = z.infer<typeof RequestParamsSchema>;
 export type RequestBody = z.infer<typeof RequestBodySchema>;
@@ -40,7 +42,10 @@ export async function screenshot(
 	}
 
     if (memory.isRunning) {
-        const { quality } = RequestBodySchema.parse(req.body)
+        const bodyParams = RequestBodySchema.parse(req.body)
+        const queryParams = RequestQuerySchema.parse(req.query)
+        // Support quality from both body and query (query from scraper-service)
+        const quality = bodyParams.quality ?? (queryParams.quality ? parseInt(queryParams.quality, 10) : undefined)
         const tempPath = `/tmp/screenshot_${Date.now()}.jpg`;
 
         try {
