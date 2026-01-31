@@ -7,7 +7,10 @@ import { spawn } from "child_process"
 import crypto from "crypto"
 import path from "path"
 import axios, { isAxiosError } from "axios"
-import { execSync } from "child_process"
+import { execSync, exec } from "child_process"
+import { promisify } from "util"
+
+const execAsync = promisify(exec)
 import UserAgent from "user-agents"
 import * as fs from 'fs'
 import { getDriver, IBrowser, IPage, LaunchOptions as DriverLaunchOptions, Cookie } from "./drivers"
@@ -1071,19 +1074,33 @@ export async function launchBrowser(
                 if (puppeteerBrowser?.on) {
                     puppeteerBrowser.on('targetcreated', async (target: unknown) => {
                         try {
-                            const typedTarget = target as { 
-                                type: () => string; 
+                            const typedTarget = target as {
+                                type: () => string;
                                 page: () => Promise<unknown>;
                                 url: () => string;
+                                opener: () => unknown;
                             };
-                            
-                            LOGGER.info('Target created', { type: typedTarget.type(), url: typedTarget.url?.() || 'N/A' });
-                            
-                            if (typedTarget.type() === 'page') {
-                                const rawPage = await typedTarget.page();
-                                if (rawPage && browser) {
-                                    await setupNewPage(rawPage as IPage);
+                            const isPopup = typeof typedTarget.opener === 'function' && typedTarget.opener();
+                            LOGGER.info('Target created', { type: typedTarget.type(), url: typedTarget.url?.() || 'N/A', isPopup: !!isPopup });
+                            if (typedTarget.type() !== 'page') return;
+                            const rawPage = await typedTarget.page();
+                            if (!rawPage || !browser) return;
+                            if (isPopup) {
+                                await new Promise(resolve => setTimeout(resolve, 150));
+                                const [mainW, mainH] = WINDOW_SCREEN_RESOLUTION.split('x').map(Number);
+                                const w = mainW > 0 ? mainW : 1280;
+                                const h = mainH > 0 ? mainH : 1024;
+                                await (rawPage as IPage).setViewport({ width: w, height: h });
+                                // Resize the actual OS window (X11) so VNC/window matches viewport
+                                try {
+                                    const env = { ...process.env, DISPLAY: process.env.DISPLAY || ':1' };
+                                    await execAsync(`xdotool windowsize $(xdotool getactivewindow) ${w} ${h}`, { env, timeout: 3000 });
+                                    LOGGER.info('Popup window resized at OS level', { width: w, height: h });
+                                } catch (e) {
+                                    LOGGER.warn('xdotool resize failed (e.g. not in X11)', { error: e instanceof Error ? e.message : e });
                                 }
+                            } else {
+                                await setupNewPage(rawPage as IPage);
                             }
                         } catch (error) {
                             const err = error as { name?: string; message?: string };
