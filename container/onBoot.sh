@@ -48,6 +48,12 @@ run_env_setup(){
     
     # Set proper permissions
     chown -R user:user /home/user/temp /home/user/.config/chrome /home/user/session /home/user/downloads /home/user/uploads 2>/dev/null || true
+
+    # Seed Chrome configs from our backup directory
+    echo "[INFO] Seeding Chrome configurations..."
+    cp "/home/user/defaults/chrome/Local State" "/home/user/temp/Local State" 2>/dev/null || true
+    cp "/home/user/defaults/chrome/Default/Preferences" "/home/user/temp/Default/Preferences" 2>/dev/null || true
+    chown -R user:user /home/user/temp/ 2>/dev/null || true
 }
 
 run_openbox() {

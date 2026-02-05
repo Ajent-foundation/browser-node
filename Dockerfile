@@ -114,11 +114,13 @@ RUN useradd user && \
 # Copy configs
 COPY --from=builder /home/app/container/openbox/ /home/user/.config/openbox/
 COPY --from=builder /home/app/container/lxpanel/ /home/user/.config/lxpanel/
-COPY --from=builder /home/app/container/chrome/Preferences /home/user/temp/Default/Preferences
 
-ARG sourc="/home/app/container/chrome/Local State"
-ARG destination="/home/user/temp/Local State"
-COPY --from=builder ${sourc} ${destination}
+# Copy configs to a seed directory to avoid being hidden by runtime mounts
+COPY --from=builder ["/home/app/container/chrome/Preferences", "/home/user/defaults/chrome/Default/"]
+COPY --from=builder ["/home/app/container/chrome/Local State", "/home/user/defaults/chrome/"]
+
+# Ensure seed files are owned by user
+RUN chown -R user:user /home/user/defaults/
 
 # Copy fonts
 COPY --from=builder /home/app/container/fonts/Ubuntu/* /home/user/.local/share/fonts/
